@@ -1706,7 +1706,7 @@ if 'run' in st.session_state and st.session_state.run:
                         st.markdown(_guia_aux_sin_banco(row), unsafe_allow_html=True)
 
     with tab6:
-        st.markdown("<div class='section-title'>Conciliacion Bancaria Formal — Formato Estandar Colombia</div>", unsafe_allow_html=True)
+        st.markdown("<div class='section-title'>Conciliacion Bancaria Formal</div>", unsafe_allow_html=True)
 
         calc_banco = sa + tab_s - tca_s
         dif_b      = calc_banco - sac
@@ -1714,94 +1714,112 @@ if 'run' in st.session_state and st.session_state.run:
         dif_a      = calc_aux - sf_a
         dif_saldos = sac - sf_a
 
+        def _card(ok):
+            if ok: return ('rgba(102,187,106,0.13)', '#66bb6a', 'rgba(102,187,106,0.35)')
+            return ('rgba(239,83,80,0.13)', '#ef5350', 'rgba(239,83,80,0.35)')
+
+        TL = 'padding:5px 4px;font-size:.88rem;'
+        TR = 'padding:5px 4px;font-size:.88rem;text-align:right;'
+        TLB = 'padding:7px 4px;font-size:.9rem;font-weight:700;'
+        TRB = 'padding:7px 4px;font-size:.9rem;font-weight:800;text-align:right;'
+
         c1, c2 = st.columns(2)
         with c1:
-            estado_b = "CUADRA" if abs(dif_b) < 1 else "REVISAR"
-            color_b  = "#e8f5e9" if abs(dif_b) < 1 else "#fce4ec"
-            borde_b  = "#2e7d32" if abs(dif_b) < 1 else "#c62828"
+            bg_b, br_b, sp_b = _card(abs(dif_b) < 1)
+            est_b = 'CUADRA' if abs(dif_b) < 1 else 'REVISAR'
             st.markdown(f"""
-            <div style='background:{color_b};border-left:4px solid {borde_b};border-radius:8px;padding:16px 20px;'>
-              <b style='font-size:1rem;'>I. Saldo segun Extracto Bancario</b>
-              <table style='width:100%;margin-top:10px;font-size:.9rem;border-collapse:collapse;'>
-                <tr><td>Saldo anterior</td><td style='text-align:right;'><b>{cop(sa)}</b></td></tr>
-                <tr><td>(+) Total abonos</td><td style='text-align:right;'><b>{cop(tab_s)}</b></td></tr>
-                <tr><td>(-) Total cargos</td><td style='text-align:right;'><b>{cop(tca_s)}</b></td></tr>
-                <tr style='border-top:2px solid {borde_b};'><td><b>(=) Saldo calculado</b></td><td style='text-align:right;'><b>{cop(calc_banco)}</b></td></tr>
-                <tr><td>(=) Saldo declarado</td><td style='text-align:right;'><b>{cop(sac)}</b></td></tr>
-                <tr><td><b>Diferencia</b></td><td style='text-align:right;font-weight:800;'>{cop(dif_b)} {estado_b}</td></tr>
-              </table>
-            </div>""", unsafe_allow_html=True)
+<div style='background:{bg_b};border-left:4px solid {br_b};border-radius:10px;padding:18px 22px;'>
+  <div style='font-size:.95rem;font-weight:800;margin-bottom:12px;'>I. Saldo segun Extracto Bancario</div>
+  <table style='width:100%;border-collapse:collapse;'>
+    <tr><td style='{TL}'>Saldo anterior</td><td style='{TR}'>{cop(sa)}</td></tr>
+    <tr><td style='{TL}'>(+) Total abonos</td><td style='{TR}'>{cop(tab_s)}</td></tr>
+    <tr><td style='{TL}'>(-) Total cargos</td><td style='{TR}'>{cop(tca_s)}</td></tr>
+    <tr><td colspan='2' style='border-top:1px solid {sp_b};padding:2px 0;'></td></tr>
+    <tr><td style='{TLB}'>(=) Saldo calculado</td><td style='{TRB}'>{cop(calc_banco)}</td></tr>
+    <tr><td style='{TL}'>(=) Saldo declarado</td><td style='{TR}'>{cop(sac)}</td></tr>
+    <tr><td colspan='2' style='border-top:1px solid {sp_b};padding:2px 0;'></td></tr>
+    <tr><td style='{TLB}'>Diferencia</td>
+        <td style='{TRB}color:{br_b};'>{cop(dif_b)} &nbsp; {est_b}</td></tr>
+  </table>
+</div>""", unsafe_allow_html=True)
 
         with c2:
-            estado_a = "CUADRA" if abs(dif_a) < 1 else "REVISAR"
-            color_a  = "#e8f5e9" if abs(dif_a) < 1 else "#fce4ec"
-            borde_a  = "#2e7d32" if abs(dif_a) < 1 else "#c62828"
+            bg_a, br_a, sp_a = _card(abs(dif_a) < 1)
+            est_a = 'CUADRA' if abs(dif_a) < 1 else 'REVISAR'
             st.markdown(f"""
-            <div style='background:{color_a};border-left:4px solid {borde_a};border-radius:8px;padding:16px 20px;'>
-              <b style='font-size:1rem;'>II. Saldo segun Auxiliar Contable</b>
-              <table style='width:100%;margin-top:10px;font-size:.9rem;border-collapse:collapse;'>
-                <tr><td>Saldo inicial</td><td style='text-align:right;'><b>{cop(si_a)}</b></td></tr>
-                <tr><td>(+) Total debitos</td><td style='text-align:right;'><b>{cop(td_a)}</b></td></tr>
-                <tr><td>(-) Total creditos</td><td style='text-align:right;'><b>{cop(tc_a)}</b></td></tr>
-                <tr style='border-top:2px solid {borde_a};'><td><b>(=) Saldo calculado</b></td><td style='text-align:right;'><b>{cop(calc_aux)}</b></td></tr>
-                <tr><td>(=) Saldo final declarado</td><td style='text-align:right;'><b>{cop(sf_a)}</b></td></tr>
-                <tr><td><b>Diferencia</b></td><td style='text-align:right;font-weight:800;'>{cop(dif_a)} {estado_a}</td></tr>
-              </table>
-            </div>""", unsafe_allow_html=True)
+<div style='background:{bg_a};border-left:4px solid {br_a};border-radius:10px;padding:18px 22px;'>
+  <div style='font-size:.95rem;font-weight:800;margin-bottom:12px;'>II. Saldo segun Auxiliar Contable</div>
+  <table style='width:100%;border-collapse:collapse;'>
+    <tr><td style='{TL}'>Saldo inicial</td><td style='{TR}'>{cop(si_a)}</td></tr>
+    <tr><td style='{TL}'>(+) Total debitos</td><td style='{TR}'>{cop(td_a)}</td></tr>
+    <tr><td style='{TL}'>(-) Total creditos</td><td style='{TR}'>{cop(tc_a)}</td></tr>
+    <tr><td colspan='2' style='border-top:1px solid {sp_a};padding:2px 0;'></td></tr>
+    <tr><td style='{TLB}'>(=) Saldo calculado</td><td style='{TRB}'>{cop(calc_aux)}</td></tr>
+    <tr><td style='{TL}'>(=) Saldo final declarado</td><td style='{TR}'>{cop(sf_a)}</td></tr>
+    <tr><td colspan='2' style='border-top:1px solid {sp_a};padding:2px 0;'></td></tr>
+    <tr><td style='{TLB}'>Diferencia</td>
+        <td style='{TRB}color:{br_a};'>{cop(dif_a)} &nbsp; {est_a}</td></tr>
+  </table>
+</div>""", unsafe_allow_html=True)
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        color_ds = "#e8f5e9" if abs(dif_saldos) < 1 else "#fce4ec"
-        borde_ds = "#2e7d32" if abs(dif_saldos) < 1 else "#c62828"
-        estado_ds = "Saldos iguales — conciliacion perfecta" if abs(dif_saldos) < 1 else f"Diferencia de {cop(abs(dif_saldos))} entre banco y auxiliar"
+        st.markdown('<br>', unsafe_allow_html=True)
+        bg_ds, br_ds, sp_ds = _card(abs(dif_saldos) < 1)
+        est_ds = ('Saldos iguales' if abs(dif_saldos) < 1
+                  else f'Diferencia de {cop(abs(dif_saldos)).strip()} entre banco y auxiliar')
         st.markdown(f"""
-        <div style='background:{color_ds};border-left:4px solid {borde_ds};border-radius:8px;padding:16px 20px;'>
-          <b style='font-size:1rem;'>III. Diferencia Neta Banco vs Auxiliar</b>
-          <table style='width:100%;margin-top:10px;font-size:.9rem;border-collapse:collapse;'>
-            <tr><td>Saldo banco (final)</td><td style='text-align:right;'><b>{cop(sac)}</b></td></tr>
-            <tr><td>Saldo auxiliar (final)</td><td style='text-align:right;'><b>{cop(sf_a)}</b></td></tr>
-            <tr style='border-top:2px solid {borde_ds};'><td><b>DIFERENCIA NETA</b></td><td style='text-align:right;font-weight:800;'>{cop(dif_saldos)}</td></tr>
-            <tr><td>Abonos banco vs Debitos auxiliar</td><td style='text-align:right;'>{cop(tab_s - td_a)}</td></tr>
-            <tr><td>Cargos banco vs Creditos auxiliar</td><td style='text-align:right;'>{cop(tca_s - tc_a)}</td></tr>
-          </table>
-          <div style='margin-top:10px;font-weight:700;'>{estado_ds}</div>
-        </div>""", unsafe_allow_html=True)
+<div style='background:{bg_ds};border-left:4px solid {br_ds};border-radius:10px;padding:18px 22px;'>
+  <div style='font-size:.95rem;font-weight:800;margin-bottom:12px;'>III. Diferencia Neta Banco vs Auxiliar</div>
+  <table style='width:100%;border-collapse:collapse;'>
+    <tr><td style='{TL}'>Saldo banco (final)</td><td style='{TR}'>{cop(sac)}</td></tr>
+    <tr><td style='{TL}'>Saldo auxiliar (final)</td><td style='{TR}'>{cop(sf_a)}</td></tr>
+    <tr><td colspan='2' style='border-top:1px solid {sp_ds};padding:2px 0;'></td></tr>
+    <tr><td style='{TLB}'>DIFERENCIA NETA</td>
+        <td style='{TRB}color:{br_ds};letter-spacing:.02em;'>{cop(dif_saldos)}</td></tr>
+    <tr><td colspan='2' style='padding:4px 0;'></td></tr>
+    <tr><td style='{TL}'>Abonos banco vs Debitos auxiliar</td><td style='{TR}'>{cop(tab_s - td_a)}</td></tr>
+    <tr><td style='{TL}'>Cargos banco vs Creditos auxiliar</td><td style='{TR}'>{cop(tca_s - tc_a)}</td></tr>
+  </table>
+  <div style='margin-top:12px;font-weight:700;font-size:.88rem;color:{br_ds};'>{est_ds}</div>
+</div>""", unsafe_allow_html=True)
 
         if not df_aux.empty:
-            val_sin_aux       = s_banco["VALOR_BANCO"].sum()   if not s_banco.empty    else 0
-            val_sin_banco_deb = df_solo_aux["DEBITO"].sum()    if not df_solo_aux.empty else 0
-            val_sin_banco_cre = df_solo_aux["CREDITO"].sum()   if not df_solo_aux.empty else 0
-            ico2, lbl2, cls2 = _semaforo_conciliacion(pct_conc)
-            badge_cls2 = "badge-verde" if pct_conc >= 90 else "badge-naranja"
-
-            st.markdown("<br>", unsafe_allow_html=True)
+            val_sin_aux       = s_banco['VALOR_BANCO'].sum()    if not s_banco.empty     else 0
+            val_sin_banco_deb = df_solo_aux['DEBITO'].sum()     if not df_solo_aux.empty else 0
+            val_sin_banco_cre = df_solo_aux['CREDITO'].sum()    if not df_solo_aux.empty else 0
+            ico2, lbl2, _     = _semaforo_conciliacion(pct_conc)
+            b2 = 'badge-verde' if pct_conc >= 90 else 'badge-naranja'
+            st.markdown('<br>', unsafe_allow_html=True)
             st.markdown(f"""
-            <div class='callout-info'>
-              <b>IV. Composicion de la Diferencia y Conclusion Auditora</b><br>
-              Monto banco sin registro auxiliar: <b>{cop(val_sin_aux)}</b><br>
-              Monto auxiliar debito sin banco: <b>{cop(val_sin_banco_deb)}</b><br>
-              Monto auxiliar credito sin banco: <b>{cop(val_sin_banco_cre)}</b><br>
-              Tasa de conciliacion: <span class='{badge_cls2}'>{ico2} {pct_conc:.1f}% — {lbl2}</span><br><br>
-              <b>Conclusion:</b> La presente conciliacion bancaria fue elaborada con base en el extracto Bancolombia
-              y el auxiliar contable cuenta 1120.05.01 del periodo. Tasa de conciliacion {pct_conc:.1f}% —
-              {"los registros se encuentran en orden." if pct_conc >= 90
-               else "existen diferencias que requieren revision contable antes del cierre."}
-            </div>""", unsafe_allow_html=True)
+<div class='callout-info'>
+  <b>IV. Composicion de la Diferencia y Conclusion Auditora</b><br>
+  Monto banco sin registro auxiliar: <b>{cop(val_sin_aux).strip()}</b><br>
+  Monto auxiliar debito sin banco: <b>{cop(val_sin_banco_deb).strip()}</b><br>
+  Monto auxiliar credito sin banco: <b>{cop(val_sin_banco_cre).strip()}</b><br>
+  Tasa de conciliacion: <span class='{b2}'>{ico2} {pct_conc:.1f}% &mdash; {lbl2}</span><br><br>
+  <b>Conclusion:</b> Conciliacion elaborada con base en el extracto Bancolombia y el auxiliar
+  contable cuenta 1120.05.01. Tasa {pct_conc:.1f}% &mdash;
+  {'los registros estan en orden.' if pct_conc >= 90 else 'existen diferencias que requieren revision antes del cierre.'}
+</div>""", unsafe_allow_html=True)
 
-        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('<br>', unsafe_allow_html=True)
         st.markdown("""
-        <div style='display:flex;gap:40px;padding:20px;background:#f8f9fa;border-radius:10px;border:1px solid #e0e0e0;'>
-          <div style='flex:1;text-align:center;border-right:1px solid #ccc;padding-right:20px;'>
-            <div style='font-weight:800;font-size:1rem;color:#1565C0;'>CARLOS ANDRES SILVA VELA</div>
-            <div style='font-size:.85rem;color:#546e7a;'>REPRESENTANTE LEGAL</div>
-            <div style='font-size:.8rem;color:#78909c;margin-top:4px;'>C.C. 1061717925</div>
-          </div>
-          <div style='flex:1;text-align:center;padding-left:20px;'>
-            <div style='font-weight:800;font-size:1rem;color:#1565C0;'>FERNANDO CUCALON SANCHEZ</div>
-            <div style='font-size:.85rem;color:#546e7a;'>CONTADOR PUBLICO</div>
-            <div style='font-size:.8rem;color:#78909c;margin-top:4px;'>T.P. 23049-T</div>
-          </div>
-        </div>""", unsafe_allow_html=True)
-
+<div style='display:flex;gap:32px;padding:22px 28px;
+            background:rgba(66,165,245,0.06);
+            border:1px solid rgba(66,165,245,0.2);
+            border-radius:12px;'>
+  <div style='flex:1;text-align:center;
+              border-right:1px solid rgba(66,165,245,0.2);
+              padding-right:24px;'>
+    <div style='font-weight:800;font-size:.95rem;color:#42a5f5;'>CARLOS ANDRES SILVA VELA</div>
+    <div style='font-size:.82rem;opacity:.7;margin-top:3px;'>REPRESENTANTE LEGAL</div>
+    <div style='font-size:.78rem;opacity:.5;margin-top:2px;'>C.C. 1061717925</div>
+  </div>
+  <div style='flex:1;text-align:center;padding-left:24px;'>
+    <div style='font-weight:800;font-size:.95rem;color:#42a5f5;'>FERNANDO CUCALON SANCHEZ</div>
+    <div style='font-size:.82rem;opacity:.7;margin-top:3px;'>CONTADOR PUBLICO</div>
+    <div style='font-size:.78rem;opacity:.5;margin-top:2px;'>T.P. 23049-T</div>
+  </div>
+</div>""", unsafe_allow_html=True)
 
     with tab7:
         st.markdown("<div class='section-title'>Visualizaciones</div>", unsafe_allow_html=True)

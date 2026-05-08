@@ -207,6 +207,7 @@ def parsear_banco_pdf(ruta, usar_ocr=False):
                         'VALOR': valor,
                         'SALDO': saldo,
                         'TIPO': 'ABONO' if (valor or 0) >= 0 else 'CARGO',
+                        'PAGINA': n_pag + 1,
                     })
             else:
                 # Fallback línea a línea usando el texto (ya sea normal u OCR)
@@ -234,6 +235,7 @@ def parsear_banco_pdf(ruta, usar_ocr=False):
                         'VALOR': valor,
                         'SALDO': saldo,
                         'TIPO': 'ABONO' if (valor or 0) >= 0 else 'CARGO',
+                        'PAGINA': n_pag + 1,
                     })
 
     df = pd.DataFrame(registros)
@@ -936,7 +938,8 @@ def comparar_documentos(df_b, df_a):
             'DESCRIPCION': row_b['DESCRIPCION'], 'VALOR_BANCO': vb,
             'DOC_AUXILIAR': match_doc, 'FECHA_AUXILIAR': match_fecha_aux,
             'CONCEPTO_AUX': match_conc, 'MONTO_AUXILIAR': match_monto,
-            'DIFERENCIA': diff_val, 'ESTADO': estado, 'MATCH_TIPO': match_tipo or 'SIN_MATCH'
+            'DIFERENCIA': diff_val, 'ESTADO': estado, 'MATCH_TIPO': match_tipo or 'SIN_MATCH',
+            'PAGINA_PDF': row_b.get('PAGINA', ''),
         })
     df_comp = pd.DataFrame(filas)
     df_solo_aux = df_a[~df_a.index.isin(idx_usados)].copy()
@@ -1173,6 +1176,34 @@ details > summary {
 </style>
 """, unsafe_allow_html=True)
 
+# ── Control de acceso ─────────────────────────────────────────────────────────
+_PWD_OK = os.environ.get("APP_PASSWORD", "crediexpress2025")
+
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+
+if not st.session_state.autenticado:
+    st.markdown("""
+    <div style='max-width:420px;margin:80px auto 0 auto;'>
+      <div class='main-header' style='text-align:center;padding:32px 40px;'>
+        <div style='font-size:2.5rem;margin-bottom:8px;'>🔒</div>
+        <h1 style='font-size:1.4rem;'>Acceso Restringido</h1>
+        <p>CREDIEXPRESS POPAYÁN SAS</p>
+      </div>
+    </div>""", unsafe_allow_html=True)
+    col_l, col_c, col_r = st.columns([1, 2, 1])
+    with col_c:
+        pwd = st.text_input("Contraseña", type="password", placeholder="Ingrese la contraseña...",
+                            label_visibility="collapsed")
+        if st.button("Ingresar", use_container_width=True):
+            if pwd == _PWD_OK:
+                st.session_state.autenticado = True
+                st.rerun()
+            else:
+                st.error("Contraseña incorrecta. Intente de nuevo.")
+        st.caption("💡 Contacte al administrador si olvidó la contraseña.")
+    st.stop()
+
 # ── Helpers de análisis (solo UI, no tocan datos) ────────────────────────────
 
 def _cop_limpio(v):
@@ -1216,12 +1247,14 @@ def _guia_banco_sin_aux(row):
     desc   = str(row.get('DESCRIPCION', ''))[:60]
     valor  = row.get('VALOR_BANCO', 0)
     tipo   = row.get('TIPO_MOV', '')
+    pagina = row.get('PAGINA_PDF', '')
+    ref_pagina = f"Página <b>{pagina}</b> del PDF" if pagina else "Ver extracto bancario"
     cuenta, comprobante = _inferir_cuenta_sugerida(desc, valor)
     signo  = "+" if valor > 0 else "-"
     return f"""
 <div class='guia-row'>
 <b>📍 UBICAR EN EXTRACTO BANCARIO</b><br>
-&nbsp;&nbsp;Fecha: <b>{fecha}</b> &nbsp;|&nbsp; Tipo: <b>{tipo}</b> &nbsp;|&nbsp; Valor: <b>{signo}${abs(valor):,.0f}</b><br>
+&nbsp;&nbsp;Fecha: <b>{fecha}</b> &nbsp;|&nbsp; Tipo: <b>{tipo}</b> &nbsp;|&nbsp; Valor: <b>{signo}${abs(valor):,.0f}</b> &nbsp;|&nbsp; {ref_pagina}<br>
 &nbsp;&nbsp;Descripción: <i>"{desc}"</i><br><br>
 <b>✏️ ACCIÓN EN SISTEMA CONTABLE</b><br>
 &nbsp;&nbsp;Crear comprobante: <b>{comprobante}-XXXXXX</b><br>
@@ -1247,6 +1280,24 @@ def _guia_aux_sin_banco(row):
 &nbsp;&nbsp;Buscar movimiento de <b>${abs(valor or 0):,.0f} COP</b> cerca del <b>{fecha}</b><br>
 &nbsp;&nbsp;Si no aparece: verificar si fue anulado, está en otro período o es asiento de ajuste interno.
 </div>"""
+
+def _extraer_periodo(nombre_archivo):
+    """Extrae (anio, mes) del nombre del archivo. Ej: FEBRERO_2025 -> (2025, 2)."""
+    meses = {
+        'enero':1,'febrero':2,'marzo':3,'abril':4,'mayo':5,'junio':6,
+        'julio':7,'agosto':8,'septiembre':9,'octubre':10,'noviembre':11,'diciembre':12,
+        'january':1,'february':2,'march':3,'april':4,'may':5,'june':6,
+        'july':7,'august':8,'september':9,'october':10,'november':11,'december':12,
+    }
+    n = (nombre_archivo or '').lower()
+    anio_m = re.search(r'(20\d{2})', n)
+    mes_num = next((v for k, v in meses.items() if k in n), None)
+    if anio_m and mes_num:
+        return (int(anio_m.group(1)), mes_num)
+    return None
+
+_MESES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+             'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 
 # ── Header dinámico ───────────────────────────────────────────────────────────
 st.markdown("""
@@ -1320,6 +1371,26 @@ if 'run' in st.session_state and st.session_state.run:
         except Exception as e:
             st.error(f"❌ Error al procesar los archivos: {e}")
             st.stop()
+
+    # ── Validación de período ─────────────────────────────────────────────────
+    periodo_b = _extraer_periodo(banco_file.name)
+    periodo_a = _extraer_periodo(aux_file.name)
+    if periodo_b and periodo_a and periodo_b != periodo_a:
+        st.markdown(f"""
+        <div class='callout-danger'>
+          <b>⚠️ ALERTA DE PERÍODO — Los archivos son de meses distintos</b><br>
+          Extracto bancario: <b>{_MESES_ES[periodo_b[1]-1]} {periodo_b[0]}</b>
+          &nbsp;·&nbsp;
+          Auxiliar contable: <b>{_MESES_ES[periodo_a[1]-1]} {periodo_a[0]}</b><br>
+          Para una conciliación correcta ambos archivos deben ser del mismo mes y año.
+          Verifique los archivos cargados antes de continuar.
+        </div>""", unsafe_allow_html=True)
+    elif periodo_b and periodo_a:
+        st.markdown(f"""
+        <div class='callout-success' style='padding:8px 14px;font-size:.88rem;'>
+          ✅ Período verificado: ambos archivos corresponden a
+          <b>{_MESES_ES[periodo_b[1]-1]} {periodo_b[0]}</b>
+        </div>""", unsafe_allow_html=True)
 
     # Comparación
     if not df_aux.empty:

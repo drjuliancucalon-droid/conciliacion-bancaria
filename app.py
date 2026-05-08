@@ -943,33 +943,200 @@ def comparar_documentos(df_b, df_a):
     df_solo_aux['ESTADO'] = '📋 SOLO EN AUXILIAR'
     return df_comp, df_solo_aux
 
-# ── Interfaz Streamlit ──────────────────────────────────────────────────────
-st.title("🏦 CREDIEXPRESS POPAYÁN SAS — Conciliación Bancaria Premium")
-st.markdown("### Extracto Bancolombia ↔ Auxiliar Contable · Cuenta 1120.05.01")
-st.markdown("**Enero 2025** · Cuenta Ahorros #26100001167")
+# ══════════════════════════════════════════════════════════════════════════════
+# INTERFAZ PREMIUM — solo capa de presentación, sin tocar lógica de datos
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── CSS Global ────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* ── Fuente y fondo ── */
+html, body, [class*="css"] { font-family: 'Segoe UI', system-ui, sans-serif; }
+
+/* ── Tarjetas métricas ── */
+[data-testid="metric-container"] {
+    background: #ffffff;
+    border: 1px solid #e3e8f0;
+    border-left: 4px solid #1565C0;
+    border-radius: 10px;
+    padding: 16px 20px;
+    box-shadow: 0 2px 8px rgba(21,101,192,0.07);
+}
+[data-testid="metric-container"] label { color: #546e7a; font-size: 0.78rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+[data-testid="metric-container"] [data-testid="stMetricValue"] { color: #1565C0; font-size: 1.25rem; font-weight: 700; }
+
+/* ── Tabs ── */
+button[data-baseweb="tab"] { font-weight: 600; font-size: 0.88rem; border-radius: 8px 8px 0 0; }
+button[data-baseweb="tab"][aria-selected="true"] { color: #1565C0; border-bottom: 3px solid #1565C0; }
+
+/* ── Dataframes ── */
+[data-testid="stDataFrame"] { border-radius: 10px; overflow: hidden; box-shadow: 0 1px 6px rgba(0,0,0,.06); }
+
+/* ── Sidebar ── */
+[data-testid="stSidebar"] { background: linear-gradient(180deg,#1565C0 0%,#0d47a1 100%); }
+[data-testid="stSidebar"] * { color: #ffffff !important; }
+[data-testid="stSidebar"] .stButton>button { background:#ffffff22; border:1px solid #ffffff55; border-radius:8px; font-weight:700; width:100%; }
+[data-testid="stSidebar"] .stButton>button:hover { background:#ffffff44; }
+
+/* ── Expanders ── */
+details summary { font-weight: 700; font-size: 0.95rem; }
+
+/* ── Callout boxes ── */
+.callout-info    { background:#e8f4fd; border-left:4px solid #1565C0; border-radius:6px; padding:12px 16px; margin:8px 0; }
+.callout-success { background:#e8f5e9; border-left:4px solid #2e7d32; border-radius:6px; padding:12px 16px; margin:8px 0; }
+.callout-warning { background:#fff8e1; border-left:4px solid #f57f17; border-radius:6px; padding:12px 16px; margin:8px 0; }
+.callout-danger  { background:#fce4ec; border-left:4px solid #c62828; border-radius:6px; padding:12px 16px; margin:8px 0; }
+.callout-accion  { background:#f3e5f5; border-left:4px solid #6a1b9a; border-radius:6px; padding:12px 16px; margin:8px 0; font-family:monospace; }
+
+/* ── Badge ── */
+.badge-verde  { display:inline-block; background:#e8f5e9; color:#2e7d32; border-radius:20px; padding:2px 10px; font-size:.8rem; font-weight:700; }
+.badge-rojo   { display:inline-block; background:#fce4ec; color:#c62828; border-radius:20px; padding:2px 10px; font-size:.8rem; font-weight:700; }
+.badge-naranja{ display:inline-block; background:#fff3e0; color:#e65100; border-radius:20px; padding:2px 10px; font-size:.8rem; font-weight:700; }
+.badge-azul   { display:inline-block; background:#e3f2fd; color:#1565C0; border-radius:20px; padding:2px 10px; font-size:.8rem; font-weight:700; }
+
+/* ── Header ── */
+.main-header { background:linear-gradient(135deg,#1565C0,#1e88e5); color:white; padding:24px 32px; border-radius:14px; margin-bottom:20px; }
+.main-header h1 { color:white !important; margin:0; font-size:1.7rem; }
+.main-header p  { color:#bbdefb !important; margin:4px 0 0 0; font-size:.95rem; }
+
+/* ── Sección título ── */
+.section-title { color:#1565C0; font-size:1.1rem; font-weight:700; border-bottom:2px solid #e3f2fd; padding-bottom:6px; margin:16px 0 10px 0; }
+
+/* ── Tabla de guía ── */
+.guia-row { background:#f8f9fa; border-radius:8px; padding:12px 16px; margin:6px 0; border:1px solid #e0e0e0; }
+.guia-row:hover { background:#e3f2fd; border-color:#90caf9; }
+</style>
+""", unsafe_allow_html=True)
+
+# ── Helpers de análisis (solo UI, no tocan datos) ────────────────────────────
+
+def _cop_limpio(v):
+    """Versión limpia del cop() para HTML."""
+    if v is None or (isinstance(v, float) and np.isnan(v)):
+        return 'N/A'
+    return f"${abs(v):,.0f}" + (" CR" if v < 0 else "")
+
+def _semaforo_conciliacion(pct):
+    if pct >= 90: return "🟢", "EXCELENTE", "verde"
+    if pct >= 75: return "🟡", "BUENA",     "naranja"
+    if pct >= 50: return "🟠", "REGULAR",   "naranja"
+    return "🔴", "CRÍTICA", "rojo"
+
+def _inferir_cuenta_sugerida(desc, valor):
+    """Sugiere cuenta contable para movimientos bancarios sin asiento."""
+    d = (desc or '').upper()
+    if any(x in d for x in ['GMF','4X1000','IMPTO GOBIERNO']):
+        return '5305 — Impuesto GMF 4×1000', 'NC'
+    if any(x in d for x in ['COMISION','COMISIÓN']):
+        return '5305 — Comisiones Bancarias', 'NC'
+    if 'NEQUI' in d:
+        return '5305 — Comisiones Nequi/PSE', 'NC'
+    if 'PSE' in d and valor < 0:
+        return '5305 — Comisiones PSE', 'NC'
+    if any(x in d for x in ['INTERES','INTERÉS','RENDIMIENTO']):
+        return ('4205 — Rendimientos Financieros', 'CE') if valor > 0 else ('5305 — Intereses Débito', 'NC')
+    if any(x in d for x in ['PAGO A PROV','PAGO A PROVE','PAGO PROVE']):
+        return '2205 — Proveedores', 'CE'
+    if any(x in d for x in ['NOMINA','NÓMINA','SALARIO']):
+        return '2335 — Nómina por Pagar', 'CE'
+    if any(x in d for x in ['TRANSFERENCIA','TRASLADO']):
+        return '1110 — Bancos (verificar destino)', 'CE' if valor > 0 else 'NC'
+    if valor > 0:
+        return '1305 — Clientes / Recaudo (verificar)', 'CE'
+    return '5999 — Otros Gastos (verificar)', 'NC'
+
+def _guia_banco_sin_aux(row):
+    """Genera instrucción específica para movimiento bancario sin asiento."""
+    fecha  = row.get('FECHA_BANCO', '')
+    desc   = str(row.get('DESCRIPCION', ''))[:60]
+    valor  = row.get('VALOR_BANCO', 0)
+    tipo   = row.get('TIPO_MOV', '')
+    cuenta, comprobante = _inferir_cuenta_sugerida(desc, valor)
+    signo  = "+" if valor > 0 else "-"
+    return f"""
+<div class='guia-row'>
+<b>📍 UBICAR EN EXTRACTO BANCARIO</b><br>
+&nbsp;&nbsp;Fecha: <b>{fecha}</b> &nbsp;|&nbsp; Tipo: <b>{tipo}</b> &nbsp;|&nbsp; Valor: <b>{signo}${abs(valor):,.0f}</b><br>
+&nbsp;&nbsp;Descripción: <i>"{desc}"</i><br><br>
+<b>✏️ ACCIÓN EN SISTEMA CONTABLE</b><br>
+&nbsp;&nbsp;Crear comprobante: <b>{comprobante}-XXXXXX</b><br>
+&nbsp;&nbsp;Fecha: <b>{fecha}</b> &nbsp;|&nbsp; Cuenta sugerida: <b>{cuenta}</b><br>
+&nbsp;&nbsp;Valor: <b>${abs(valor):,.0f}</b>
+</div>"""
+
+def _guia_aux_sin_banco(row):
+    """Genera instrucción específica para asiento contable sin transacción bancaria."""
+    doc     = str(row.get('DOCUMENTO', ''))
+    fecha   = str(row.get('FECHA_RAW', ''))
+    concepto= str(row.get('CONCEPTO', ''))[:60]
+    deb     = row.get('DEBITO',  None)
+    cre     = row.get('CREDITO', None)
+    valor   = deb if deb else cre
+    col     = row.get('COLUMNA', '')
+    return f"""
+<div class='guia-row'>
+<b>📋 DOCUMENTO EN AUXILIAR CONTABLE</b><br>
+&nbsp;&nbsp;Documento: <b>{doc}</b> &nbsp;|&nbsp; Fecha: <b>{fecha}</b> &nbsp;|&nbsp; Tipo: <b>{col}</b><br>
+&nbsp;&nbsp;Concepto: <i>"{concepto}"</i> &nbsp;|&nbsp; Valor: <b>${abs(valor or 0):,.0f}</b><br><br>
+<b>🔍 BUSCAR EN EXTRACTO BANCARIO</b><br>
+&nbsp;&nbsp;Buscar movimiento de <b>${abs(valor or 0):,.0f} COP</b> cerca del <b>{fecha}</b><br>
+&nbsp;&nbsp;Si no aparece: verificar si fue anulado, está en otro período o es asiento de ajuste interno.
+</div>"""
+
+# ── Header dinámico ───────────────────────────────────────────────────────────
+st.markdown("""
+<div class='main-header'>
+  <h1>🏦 Conciliación Bancaria — CREDIEXPRESS / TRASNODUS SAS</h1>
+  <p>Extracto Bancolombia &nbsp;↔&nbsp; Auxiliar Contable &nbsp;·&nbsp;
+     Detección automática de formato &nbsp;·&nbsp; Análisis inteligente de diferencias</p>
+</div>
+""", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("📂 Cargar Archivos")
-    st.info("**Formatos aceptados:** PDF (incluye OCR automático si es escaneado), CSV, Excel (.xlsx), TXT")
-    banco_file = st.file_uploader("Extracto Bancolombia", type=["pdf","csv","xlsx","txt"])
-    aux_file   = st.file_uploader("Auxiliar Contable", type=["pdf","csv","xlsx","txt"])
-    usar_ocr = st.checkbox("Forzar OCR en PDF escaneados (si está instalado)", value=True)
-    ejecutar = st.button("🚀 Ejecutar análisis completo", disabled=not (banco_file and aux_file))
+    st.markdown("""
+    <div style='text-align:center;padding:8px 0 16px 0;'>
+      <div style='font-size:2rem;'>🏦</div>
+      <div style='font-size:1.1rem;font-weight:800;letter-spacing:.03em;'>CREDIEXPRESS</div>
+      <div style='font-size:.78rem;opacity:.85;'>Conciliación Bancaria · Sistema Inteligente</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("#### 📂 Cargar Archivos")
+    banco_file = st.file_uploader("Extracto Bancolombia", type=["pdf","csv","xlsx","txt"],
+                                   help="PDF original del banco, CSV con columnas Fecha/Descripción/Valor/Saldo, o Excel.")
+    aux_file   = st.file_uploader("Auxiliar Contable", type=["pdf","csv","xlsx","txt"],
+                                   help="CSV / Excel exportado desde SIIGO, Helisa, World Office con columnas Documento/Fecha/Concepto/Debito/Credito.")
+
+    usar_ocr = st.checkbox("🔍 Forzar OCR en PDF escaneados", value=True,
+                            help="Requiere Tesseract + Poppler instalados.")
+
+    if banco_file:
+        st.markdown(f"<div style='background:#ffffff22;border-radius:6px;padding:6px 10px;font-size:.8rem;'>📄 <b>{banco_file.name}</b><br><span style='opacity:.75'>{banco_file.size/1024:.1f} KB</span></div>", unsafe_allow_html=True)
+    if aux_file:
+        st.markdown(f"<div style='background:#ffffff22;border-radius:6px;padding:6px 10px;font-size:.8rem;margin-top:4px;'>📄 <b>{aux_file.name}</b><br><span style='opacity:.75'>{aux_file.size/1024:.1f} KB</span></div>", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    ejecutar = st.button("🚀 Ejecutar análisis completo", disabled=not (banco_file and aux_file),
+                          use_container_width=True)
     if ejecutar:
         st.session_state.run = True
 
     st.markdown("---")
-    st.markdown("### 💡 Recomendaciones para máxima precisión")
+    st.markdown("#### 💡 Formatos soportados")
     st.markdown("""
-    - **Extracto bancario:** PDF original del banco (no escaneado) o CSV con columnas `Fecha, Descripción, Valor, Saldo`.
-    - **Auxiliar contable:** Preferiblemente **CSV o Excel** exportado desde SIIGO/Helisa/World Office con columnas `Documento, Fecha, Concepto, Debito, Credito`.
-    - Si el PDF está escaneado (imagen), instale **Tesseract OCR** y **Poppler** para extracción automática.
+- **PDF** — extracto bancario original
+- **CSV** — SIIGO / Helisa / World Office
+- **Excel (.xlsx)** — cualquier formato tabular
+- **TXT** — texto plano con columnas
     """)
     if OCR_AVAILABLE:
-        st.success("✅ OCR está disponible (se usará automáticamente en páginas sin texto)")
+        st.markdown("<span class='badge-verde'>✅ OCR disponible</span>", unsafe_allow_html=True)
     else:
-        st.warning("⚠️ OCR no instalado. Los PDF escaneados no se podrán leer automáticamente.\n"
-                   "Instale 'pytesseract', 'pdf2image' y el motor Tesseract+Poppler.")
+        st.markdown("<span class='badge-naranja'>⚠️ OCR no instalado</span>", unsafe_allow_html=True)
+        st.caption("Instale pytesseract + Poppler para PDFs escaneados.")
+
+    st.markdown("---")
+    st.markdown("<div style='font-size:.72rem;opacity:.7;text-align:center;'>v2.0 · CREDIEXPRESS POPAYÁN SAS<br>Desarrollado con ❤️ en Python + Streamlit</div>", unsafe_allow_html=True)
 
 if 'run' in st.session_state and st.session_state.run:
     with st.spinner("Procesando archivos..."):
@@ -1015,363 +1182,595 @@ if 'run' in st.session_state and st.session_state.run:
     ])
 
     with tab1:
-        st.header("Diagnóstico de Legibilidad")
-        # leg_banco / leg_aux = (pct, calidad, advertencias, fmt_nombre, fmt_confianza)
+        st.markdown("<div class='section-title'>📊 Diagnóstico de Archivos</div>", unsafe_allow_html=True)
         p_banco, cal_banco, adv_banco, fmt_banco, conf_banco = leg_banco
         p_aux,   cal_aux,   adv_aux,   fmt_aux,   conf_aux   = leg_aux
 
         c1, c2 = st.columns(2)
         with c1:
-            st.subheader("Extracto Banco")
-            st.metric("Legibilidad", f"{p_banco:.1f}%", cal_banco)
-            st.info(f"**Formato detectado:** {fmt_banco}  \n**Confianza:** {conf_banco}%")
-            for a in adv_banco: st.warning(a)
+            st.metric("🏦 Legibilidad Extracto Banco", f"{p_banco:.1f}%", cal_banco)
+            badge_b = "badge-verde" if p_banco >= 90 else ("badge-naranja" if p_banco >= 70 else "badge-rojo")
+            st.markdown(f"""
+            <div class='callout-info'>
+              <b>Formato detectado:</b> {fmt_banco}<br>
+              <b>Confianza:</b> <span class='{badge_b}'>{conf_banco}%</span><br>
+              <b>Movimientos leídos:</b> {len(df_banco)} registros
+            </div>""", unsafe_allow_html=True)
+            for a in adv_banco:
+                st.warning(a)
         with c2:
-            st.subheader("Auxiliar Contable")
-            st.metric("Legibilidad", f"{p_aux:.1f}%", cal_aux)
-            st.info(f"**Formato detectado:** {fmt_aux}  \n**Confianza:** {conf_aux}%")
-            for a in adv_aux: st.warning(a)
+            st.metric("📋 Legibilidad Auxiliar Contable", f"{p_aux:.1f}%", cal_aux)
+            badge_a = "badge-verde" if p_aux >= 90 else ("badge-naranja" if p_aux >= 70 else "badge-rojo")
+            st.markdown(f"""
+            <div class='callout-info'>
+              <b>Formato detectado:</b> {fmt_aux}<br>
+              <b>Confianza:</b> <span class='{badge_a}'>{conf_aux}%</span><br>
+              <b>Asientos leídos:</b> {len(df_aux)} registros
+            </div>""", unsafe_allow_html=True)
+            for a in adv_aux:
+                st.warning(a)
+
+        st.markdown("<div class='section-title'>📝 Evaluación de Calidad</div>", unsafe_allow_html=True)
         if p_banco >= 95 and p_aux >= 95:
-            st.success("✅ Ambos archivos completamente legibles.")
-        elif p_banco < 80 or p_aux < 80:
-            st.error("⚠️ Legibilidad baja. Si es PDF escaneado, active el OCR o convierta a CSV/Excel.")
+            st.markdown("""
+            <div class='callout-success'>
+              <b>✅ Ambos archivos completamente legibles.</b><br>
+              Los datos fueron extraídos con alta fidelidad. El análisis de conciliación tiene máxima confiabilidad.
+            </div>""", unsafe_allow_html=True)
+        elif p_banco >= 80 and p_aux >= 80:
+            st.markdown("""
+            <div class='callout-warning'>
+              <b>⚠️ Legibilidad aceptable con observaciones.</b><br>
+              Revise las advertencias anteriores. Algunos campos pueden haber perdido precisión.
+            </div>""", unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div class='callout-danger'>
+              <b>🔴 Legibilidad baja — resultados poco confiables.</b><br>
+              Si el PDF está escaneado, active OCR o exporte el archivo a CSV/Excel desde el sistema fuente.
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown("<div class='section-title'>ℹ️ Resumen Narrativo</div>", unsafe_allow_html=True)
+        fmt_b_lbl = fmt_banco if fmt_banco else "Desconocido"
+        fmt_a_lbl = fmt_aux   if fmt_aux   else "Desconocido"
+        st.markdown(f"""
+        <div class='callout-info'>
+          Se cargó el extracto bancario en formato <b>{fmt_b_lbl}</b> (confianza {conf_banco}%)
+          con <b>{len(df_banco)} movimientos</b> y el auxiliar contable en formato <b>{fmt_a_lbl}</b>
+          (confianza {conf_aux}%) con <b>{len(df_aux)} asientos</b>.
+          El sistema detectó los formatos automáticamente sin configuración manual.
+        </div>""", unsafe_allow_html=True)
 
     with tab2:
-        st.header("Extracto Bancolombia")
+        st.markdown("<div class='section-title'>🏦 Extracto Bancolombia</div>", unsafe_allow_html=True)
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Saldo Inicial", cop(sa))
+        col1.metric("Saldo Anterior", cop(sa))
         col2.metric("Total Abonos (+)", cop(tab_s))
-        col3.metric("Total Cargos (-)", cop(tca_s))
+        col3.metric("Total Cargos (−)", cop(tca_s))
         col4.metric("Saldo Final", cop(sac))
+
         dif_arit = (sa + tab_s - tca_s) - sac
-        st.write(f"Verificación aritmética: {cop(sa+tab_s-tca_s)} calculado")
-        st.write(f"Saldo declarado: {cop(sac)}")
         if abs(dif_arit) < 1:
-            st.success(f"Diferencia: {cop(dif_arit)} ✅ CUADRA")
+            st.markdown(f"""
+            <div class='callout-success'>
+              <b>✅ El extracto cuadra aritméticamente.</b><br>
+              {cop(sa)} + {cop(tab_s)} − {cop(tca_s)} = <b>{cop(sa+tab_s-tca_s)}</b>
+              &nbsp;≈&nbsp; Saldo final declarado <b>{cop(sac)}</b>
+              &nbsp;·&nbsp; Diferencia: <b>{cop(dif_arit)}</b>
+            </div>""", unsafe_allow_html=True)
         else:
-            st.error(f"Diferencia: {cop(dif_arit)} ⚠️ REVISAR")
-        st.subheader("Primeras 25 transacciones")
-        st.dataframe(df_banco[['FECHA_RAW','DESCRIPCION','VALOR','SALDO','TIPO']].head(25),
-                     use_container_width=True)
+            st.markdown(f"""
+            <div class='callout-danger'>
+              <b>⚠️ El extracto NO cuadra aritméticamente.</b><br>
+              {cop(sa)} + {cop(tab_s)} − {cop(tca_s)} = <b>{cop(sa+tab_s-tca_s)}</b>
+              &nbsp;vs&nbsp; Saldo declarado <b>{cop(sac)}</b>
+              &nbsp;·&nbsp; <b>Diferencia: {cop(dif_arit)}</b>
+            </div>""", unsafe_allow_html=True)
+
+        # Análisis de anomalías
+        st.markdown("<div class='section-title'>🔍 Análisis de Movimientos</div>", unsafe_allow_html=True)
+        n_abonos = (df_banco['TIPO'] == 'ABONO').sum() if 'TIPO' in df_banco.columns else 0
+        n_cargos = (df_banco['TIPO'] == 'CARGO').sum() if 'TIPO' in df_banco.columns else 0
+        st.markdown(f"""
+        <div class='callout-info'>
+          Total movimientos: <b>{len(df_banco)}</b>
+          &nbsp;·&nbsp; Abonos: <b>{n_abonos}</b>
+          &nbsp;·&nbsp; Cargos: <b>{n_cargos}</b>
+          &nbsp;·&nbsp; Promedio por movimiento: <b>{cop(df_banco['VALOR'].abs().mean() if not df_banco.empty else 0)}</b>
+        </div>""", unsafe_allow_html=True)
+
+        # Top 5 movimientos por valor absoluto
+        if not df_banco.empty and 'VALOR' in df_banco.columns:
+            top5 = df_banco.nlargest(5, df_banco['VALOR'].abs().name if hasattr(df_banco['VALOR'].abs(), 'name') else 'VALOR')
+            try:
+                top5 = df_banco.iloc[df_banco['VALOR'].abs().nlargest(5).index]
+            except Exception:
+                top5 = df_banco.head(5)
+            with st.expander("📌 Top 5 movimientos de mayor valor", expanded=False):
+                cols_show = [c for c in ['FECHA_RAW','DESCRIPCION','VALOR','SALDO','TIPO'] if c in df_banco.columns]
+                st.dataframe(top5[cols_show], use_container_width=True)
+
+        st.markdown("<div class='section-title'>📄 Detalle de Transacciones</div>", unsafe_allow_html=True)
+        cols_banco = [c for c in ['FECHA_RAW','DESCRIPCION','VALOR','SALDO','TIPO'] if c in df_banco.columns]
+        st.dataframe(df_banco[cols_banco], use_container_width=True, height=400)
 
     with tab3:
-        st.header("Auxiliar Contable")
+        st.markdown("<div class='section-title'>📋 Auxiliar Contable</div>", unsafe_allow_html=True)
         if not df_aux.empty:
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("Saldo Inicial", cop(si_a))
             col2.metric("Total Débitos", cop(td_a))
             col3.metric("Total Créditos", cop(tc_a))
             col4.metric("Saldo Final", cop(sf_a))
+
             dif_arit_aux = (si_a + td_a - tc_a) - sf_a
-            st.write(f"Verificación: {cop(si_a+td_a-tc_a)} calculado vs {cop(sf_a)} declarado")
             if abs(dif_arit_aux) < 1:
-                st.success(f"Diferencia: {cop(dif_arit_aux)} ✅ CUADRA")
+                st.markdown(f"""
+                <div class='callout-success'>
+                  <b>✅ El auxiliar cuadra aritméticamente.</b><br>
+                  {cop(si_a)} + {cop(td_a)} − {cop(tc_a)} = <b>{cop(si_a+td_a-tc_a)}</b>
+                  &nbsp;≈&nbsp; Saldo final declarado <b>{cop(sf_a)}</b>
+                  &nbsp;·&nbsp; Diferencia: <b>{cop(dif_arit_aux)}</b>
+                </div>""", unsafe_allow_html=True)
             else:
-                st.error(f"Diferencia: {cop(dif_arit_aux)} ⚠️ REVISAR")
+                st.markdown(f"""
+                <div class='callout-danger'>
+                  <b>⚠️ El auxiliar NO cuadra aritméticamente.</b><br>
+                  Diferencia de <b>{cop(dif_arit_aux)}</b> entre saldo calculado y declarado.
+                  Verifique asientos de apertura o cierres de período.
+                </div>""", unsafe_allow_html=True)
+
+            # Desglose por tipo de documento
             deb_df = df_aux[df_aux['DEBITO'].notna()]
             cre_df = df_aux[df_aux['CREDITO'].notna()]
-            des_df = df_aux[df_aux['COLUMNA'] == 'DESCONOCIDO']
-            st.write(f"Asientos DÉBITO: {len(deb_df)} — {cop(deb_df['DEBITO'].sum())}")
-            st.write(f"Asientos CRÉDITO: {len(cre_df)} — {cop(cre_df['CREDITO'].sum())}")
+            des_df = df_aux[df_aux['COLUMNA'] == 'DESCONOCIDO'] if 'COLUMNA' in df_aux.columns else pd.DataFrame()
+
+            st.markdown("<div class='section-title'>📊 Desglose por Tipo de Asiento</div>", unsafe_allow_html=True)
+            ca, cb, cc = st.columns(3)
+            ca.metric("Asientos DÉBITO", len(deb_df), f"{cop(deb_df['DEBITO'].sum())}")
+            cb.metric("Asientos CRÉDITO", len(cre_df), f"{cop(cre_df['CREDITO'].sum())}")
+            cc.metric("Sin clasificar", len(des_df))
+
             if len(des_df) > 0:
-                st.warning(f"Asientos sin clasificar: {len(des_df)}")
-            st.subheader("Primeras 25 líneas")
-            st.dataframe(df_aux[['DOCUMENTO','FECHA_RAW','CONCEPTO','DEBITO','CREDITO','COLUMNA']].head(25),
-                         use_container_width=True)
+                st.markdown(f"""
+                <div class='callout-warning'>
+                  <b>⚠️ {len(des_df)} asientos sin clasificar (columna DESCONOCIDO).</b><br>
+                  Estos asientos no pudieron ser identificados como DÉBITO ni CRÉDITO.
+                  Pueden afectar el cálculo de la conciliación.
+                </div>""", unsafe_allow_html=True)
+
+            # Desglose por tipo de comprobante (primeras 2 letras del documento)
+            if 'DOCUMENTO' in df_aux.columns:
+                tipo_doc = df_aux['DOCUMENTO'].str[:2].value_counts().head(8)
+                if not tipo_doc.empty:
+                    with st.expander("📌 Distribución por tipo de comprobante", expanded=False):
+                        for prefijo, cnt in tipo_doc.items():
+                            st.markdown(f"&nbsp;&nbsp;<span class='badge-azul'>{prefijo}</span> — <b>{cnt}</b> asientos", unsafe_allow_html=True)
+
+            st.markdown("<div class='section-title'>📄 Detalle de Asientos</div>", unsafe_allow_html=True)
+            cols_aux = [c for c in ['DOCUMENTO','FECHA_RAW','CONCEPTO','DEBITO','CREDITO','COLUMNA'] if c in df_aux.columns]
+            st.dataframe(df_aux[cols_aux], use_container_width=True, height=400)
         else:
-            st.error("No se extrajeron asientos del auxiliar.")
+            st.markdown("""
+            <div class='callout-danger'>
+              <b>❌ No se extrajeron asientos del auxiliar contable.</b><br>
+              Verifique que el archivo tiene las columnas correctas: Documento, Fecha, Concepto, Débito, Crédito.
+              Si es un PDF, active OCR o exporte a CSV desde el sistema contable.
+            </div>""", unsafe_allow_html=True)
 
     with tab4:
-        st.header("Comparación Uno a Uno")
+        st.markdown("<div class='section-title'>🔗 Comparación Banco ↔ Auxiliar</div>", unsafe_allow_html=True)
         if df_aux.empty:
-            st.warning("Sin datos")
+            st.markdown("<div class='callout-warning'>⚠️ Sin datos del auxiliar para comparar.</div>", unsafe_allow_html=True)
         else:
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Analizados", n_tot)
-            c2.metric("✅ Exactos", n_exac, f"{n_exac/max(n_tot,1)*100:.0f}%")
-            c3.metric("🔶 Aprox.", n_apr, f"{n_apr/max(n_tot,1)*100:.0f}%")
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("Total Analizados", n_tot)
+            c2.metric("✅ Exactos",    n_exac, f"{n_exac/max(n_tot,1)*100:.0f}%")
+            c3.metric("🔶 Aprox.",     n_apr,  f"{n_apr/max(n_tot,1)*100:.0f}%")
             c4.metric("❌ Solo Banco", n_sbco, f"{n_sbco/max(n_tot,1)*100:.0f}%")
-            st.progress(pct_conc/100, text=f"Tasa de conciliación: {pct_conc:.1f}%")
-            st.metric("📋 Solo Auxiliar", n_saux)
-            st.subheader("Tabla Completa (movimiento bancario vs auxiliar)")
-            st.dataframe(df_comp, use_container_width=True)
+            c5.metric("📋 Solo Aux.",  n_saux)
+
+            ico, lbl, cls = _semaforo_conciliacion(pct_conc)
+            st.progress(pct_conc / 100, text=f"{ico} Tasa de conciliación: {pct_conc:.1f}% — {lbl}")
+            st.markdown(f"""
+            <div class='callout-{"success" if pct_conc>=90 else ("warning" if pct_conc>=75 else "danger")}'>
+              <b>{ico} Conciliación {lbl} — {pct_conc:.1f}%</b><br>
+              {"Más del 90% de los movimientos tienen correspondencia en el auxiliar. Excelente control contable." if pct_conc>=90
+               else ("Entre 75% y 90% de los movimientos conciliados. Hay diferencias puntuales que requieren revisión." if pct_conc>=75
+               else "Menos del 75% de los movimientos conciliados. Se requiere revisión detallada del auxiliar contable.")}
+            </div>""", unsafe_allow_html=True)
+
+            st.markdown("<div class='section-title'>📋 Tabla Completa de Comparación</div>", unsafe_allow_html=True)
+            st.dataframe(df_comp, use_container_width=True, height=450)
 
     with tab5:
-        st.header("Reporte Detallado de Diferencias")
+        st.markdown("<div class='section-title'>📝 Reporte Detallado de Diferencias</div>", unsafe_allow_html=True)
         if df_aux.empty:
-            st.warning("Sin datos")
+            st.markdown("<div class='callout-warning'>⚠️ Sin datos del auxiliar para comparar.</div>", unsafe_allow_html=True)
         else:
-            with st.expander("✅ Coincidencias Exactas", expanded=True):
-                st.write(f"**{len(exactas)} movimientos conciliados**")
-                st.write(f"Total valor banco: {cop(exactas['VALOR_BANCO'].sum())}")
-                st.dataframe(exactas[['FECHA_BANCO','TIPO_MOV','VALOR_BANCO','DOC_AUXILIAR','MONTO_AUXILIAR']].head(60),
-                             use_container_width=True)
-                if len(exactas) > 60: st.caption(f"... y {len(exactas)-60} más (ver Excel)")
+            with st.expander(f"✅ Coincidencias Exactas — {len(exactas)} movimientos · {cop(exactas['VALOR_BANCO'].sum() if not exactas.empty else 0)}", expanded=False):
+                if exactas.empty:
+                    st.markdown("<div class='callout-warning'>Sin coincidencias exactas.</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div class='callout-success'>
+                      <b>{len(exactas)} movimientos conciliados exactamente</b> por valor y tipo de transacción.<br>
+                      Valor total conciliado: <b>{cop(exactas['VALOR_BANCO'].sum())}</b>
+                    </div>""", unsafe_allow_html=True)
+                    cols_e = [c for c in ['FECHA_BANCO','TIPO_MOV','VALOR_BANCO','DOC_AUXILIAR','MONTO_AUXILIAR'] if c in exactas.columns]
+                    st.dataframe(exactas[cols_e].head(100), use_container_width=True)
+                    if len(exactas) > 100:
+                        st.caption(f"Mostrando primeros 100 de {len(exactas)}. Descargue el Excel para ver todos.")
 
-            with st.expander("🔶 Coincidencias Aproximadas"):
+            with st.expander(f"🔶 Coincidencias Aproximadas — {len(aprox)} movimientos", expanded=False):
                 if aprox.empty:
-                    st.write("(ninguna)")
+                    st.markdown("<div class='callout-success'>Sin diferencias aproximadas.</div>", unsafe_allow_html=True)
                 else:
-                    st.dataframe(aprox[['FECHA_BANCO','TIPO_MOV','VALOR_BANCO','MONTO_AUXILIAR','DIFERENCIA','DOC_AUXILIAR']],
-                                 use_container_width=True)
+                    st.markdown(f"""
+                    <div class='callout-warning'>
+                      <b>{len(aprox)} movimientos con diferencias menores</b> (mismo período, valor cercano).<br>
+                      Revise si existen redondeos, diferencias de centavos o asientos de ajuste.
+                    </div>""", unsafe_allow_html=True)
+                    cols_a = [c for c in ['FECHA_BANCO','TIPO_MOV','VALOR_BANCO','MONTO_AUXILIAR','DIFERENCIA','DOC_AUXILIAR'] if c in aprox.columns]
+                    st.dataframe(aprox[cols_a], use_container_width=True)
 
-            with st.expander("❌ Movimientos Bancarios sin Registro Contable"):
+            # ── SECCIÓN CRÍTICA: Movimientos sin registro contable ──────────
+            n_sb = len(s_banco)
+            tot_sb = s_banco['VALOR_BANCO'].sum() if not s_banco.empty else 0
+            with st.expander(f"❌ Movimientos Bancarios SIN Registro Contable — {n_sb} trans. · {_cop_limpio(tot_sb)}", expanded=(n_sb > 0)):
                 if s_banco.empty:
-                    st.success("Todos los movimientos tienen asiento contable.")
+                    st.markdown("<div class='callout-success'>✅ Todos los movimientos tienen asiento contable.</div>", unsafe_allow_html=True)
                 else:
-                    st.write(f"**Valor total sin registro:** {cop(s_banco['VALOR_BANCO'].sum())}")
                     abonos_sb = s_banco[s_banco['VALOR_BANCO'] > 0]
                     cargos_sb = s_banco[s_banco['VALOR_BANCO'] < 0]
-                    st.write(f"Abonos sin asiento: {cop(abonos_sb['VALOR_BANCO'].sum())} ({len(abonos_sb)} trans.)")
-                    st.write(f"Cargos sin asiento: {cop(cargos_sb['VALOR_BANCO'].sum())} ({len(cargos_sb)} trans.)")
-                    st.dataframe(s_banco[['FECHA_BANCO','TIPO_MOV','VALOR_BANCO','DESCRIPCION']],
-                                 use_container_width=True)
-                    st.caption("Causas probables: movimientos de fin de mes, intereses, GMF, comisiones, pendientes contables.")
+                    st.markdown(f"""
+                    <div class='callout-danger'>
+                      <b>❌ {n_sb} movimientos bancarios no tienen asiento en el auxiliar.</b><br>
+                      Abonos sin asiento: <b>{_cop_limpio(abonos_sb['VALOR_BANCO'].sum())}</b> ({len(abonos_sb)} trans.)
+                      &nbsp;·&nbsp;
+                      Cargos sin asiento: <b>{_cop_limpio(cargos_sb['VALOR_BANCO'].sum())}</b> ({len(cargos_sb)} trans.)<br>
+                      <b>Valor total no registrado: {_cop_limpio(tot_sb)}</b>
+                    </div>""", unsafe_allow_html=True)
 
-            with st.expander("📋 Asientos Auxiliar sin Transacción Bancaria"):
+                    st.markdown("""
+                    <div class='callout-accion'>
+                      <b>📌 ¿QUÉ HACER?</b> Para cada fila de abajo: ubique el movimiento en el extracto físico
+                      y cree el comprobante contable correspondiente en su sistema (SIIGO / Helisa / World Office).
+                    </div>""", unsafe_allow_html=True)
+
+                    st.markdown("<div class='section-title'>Guía de acción por movimiento</div>", unsafe_allow_html=True)
+                    for _, row in s_banco.iterrows():
+                        st.markdown(_guia_banco_sin_aux(row), unsafe_allow_html=True)
+
+            # ── SECCIÓN CRÍTICA: Asientos sin transacción bancaria ─────────
+            n_sa = len(df_solo_aux)
+            deb_sa = df_solo_aux['DEBITO'].sum()  if not df_solo_aux.empty else 0
+            cre_sa = df_solo_aux['CREDITO'].sum() if not df_solo_aux.empty else 0
+            with st.expander(f"📋 Asientos Auxiliar SIN Transacción Bancaria — {n_sa} asientos", expanded=(n_sa > 0)):
                 if df_solo_aux.empty:
-                    st.success("Todos los asientos tienen transacción bancaria.")
+                    st.markdown("<div class='callout-success'>✅ Todos los asientos tienen transacción bancaria.</div>", unsafe_allow_html=True)
                 else:
-                    st.write(f"Débitos sin banco: {cop(df_solo_aux['DEBITO'].sum())}")
-                    st.write(f"Créditos sin banco: {cop(df_solo_aux['CREDITO'].sum())}")
-                    st.dataframe(df_solo_aux[['FECHA_RAW','DOCUMENTO','DEBITO','CREDITO','CONCEPTO']],
-                                 use_container_width=True)
-                    st.caption("Causas probables: asientos de cierre, pagos en efectivo, notas de ajuste internas.")
+                    st.markdown(f"""
+                    <div class='callout-warning'>
+                      <b>📋 {n_sa} asientos contables no tienen transacción bancaria correspondiente.</b><br>
+                      Débitos sin banco: <b>{_cop_limpio(deb_sa)}</b>
+                      &nbsp;·&nbsp;
+                      Créditos sin banco: <b>{_cop_limpio(cre_sa)}</b>
+                    </div>""", unsafe_allow_html=True)
+
+                    st.markdown("""
+                    <div class='callout-accion'>
+                      <b>📌 ¿QUÉ HACER?</b> Para cada fila de abajo: busque si el movimiento bancario existe
+                      en el extracto (puede ser de otro período). Si no existe, puede ser un asiento de ajuste
+                      interno, un pago en efectivo, o requiere anulación.
+                    </div>""", unsafe_allow_html=True)
+
+                    st.markdown("<div class='section-title'>Guía de acción por asiento</div>", unsafe_allow_html=True)
+                    for _, row in df_solo_aux.iterrows():
+                        st.markdown(_guia_aux_sin_banco(row), unsafe_allow_html=True)
 
     with tab6:
-        st.header("Conciliación Bancaria Formal (Formato Estándar Colombia)")
-        st.markdown("---")
-        st.subheader("I. Saldo según Extracto Bancario")
-        st.text(f"Saldo anterior (31/12/2024)        {cop(sa)}")
-        st.text(f"(+) Total abonos                      {cop(tab_s)}")
-        st.text(f"(-) Total cargos                      {cop(tca_s)}")
+        st.markdown("<div class='section-title'>Conciliacion Bancaria Formal — Formato Estandar Colombia</div>", unsafe_allow_html=True)
+
         calc_banco = sa + tab_s - tca_s
-        dif_b = calc_banco - sac
-        st.text(f"{'─'*60}")
-        st.text(f"(=) Saldo calculado                   {cop(calc_banco)}")
-        st.text(f"(=) Saldo declarado (31/01/2025)      {cop(sac)}")
-        if abs(dif_b) < 1: st.success(f"Diferencia: {cop(dif_b)} ✅ CUADRA")
-        else: st.error(f"Diferencia: {cop(dif_b)} ⚠️ REVISAR")
-
-        st.markdown("---")
-        st.subheader("II. Saldo según Auxiliar Contable (Cuenta 1120.05.01)")
-        st.text(f"Saldo inicial (01/01/2025)        {cop(si_a)}")
-        st.text(f"(+) Total Débitos                     {cop(td_a)}")
-        st.text(f"(-) Total Créditos                    {cop(tc_a)}")
-        calc_aux = si_a + td_a - tc_a
-        dif_a = calc_aux - sf_a
-        st.text(f"{'─'*60}")
-        st.text(f"(=) Saldo calculado                   {cop(calc_aux)}")
-        st.text(f"(=) Saldo final declarado (31/01)     {cop(sf_a)}")
-        if abs(dif_a) < 1: st.success(f"Diferencia: {cop(dif_a)} ✅ CUADRA")
-        else: st.error(f"Diferencia: {cop(dif_a)} ⚠️ REVISAR")
-
-        st.markdown("---")
-        st.subheader("III. Diferencias Banco ↔ Auxiliar")
+        dif_b      = calc_banco - sac
+        calc_aux   = si_a + td_a - tc_a
+        dif_a      = calc_aux - sf_a
         dif_saldos = sac - sf_a
-        st.text(f"Saldo banco (31/01):                  {cop(sac)}")
-        st.text(f"Saldo auxiliar (31/01):               {cop(sf_a)}")
-        st.text(f"{'─'*60}")
-        st.text(f"DIFERENCIA NETA DE SALDOS:            {cop(dif_saldos)}")
-        st.text(f"Abonos banco vs Débitos auxiliar:     {cop(tab_s - td_a)}")
-        st.text(f"Cargos banco vs Créditos auxiliar:    {cop(tca_s - tc_a)}")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            estado_b = "CUADRA" if abs(dif_b) < 1 else "REVISAR"
+            color_b  = "#e8f5e9" if abs(dif_b) < 1 else "#fce4ec"
+            borde_b  = "#2e7d32" if abs(dif_b) < 1 else "#c62828"
+            st.markdown(f"""
+            <div style='background:{color_b};border-left:4px solid {borde_b};border-radius:8px;padding:16px 20px;'>
+              <b style='font-size:1rem;'>I. Saldo segun Extracto Bancario</b>
+              <table style='width:100%;margin-top:10px;font-size:.9rem;border-collapse:collapse;'>
+                <tr><td>Saldo anterior</td><td style='text-align:right;'><b>{cop(sa)}</b></td></tr>
+                <tr><td>(+) Total abonos</td><td style='text-align:right;'><b>{cop(tab_s)}</b></td></tr>
+                <tr><td>(-) Total cargos</td><td style='text-align:right;'><b>{cop(tca_s)}</b></td></tr>
+                <tr style='border-top:2px solid {borde_b};'><td><b>(=) Saldo calculado</b></td><td style='text-align:right;'><b>{cop(calc_banco)}</b></td></tr>
+                <tr><td>(=) Saldo declarado</td><td style='text-align:right;'><b>{cop(sac)}</b></td></tr>
+                <tr><td><b>Diferencia</b></td><td style='text-align:right;font-weight:800;'>{cop(dif_b)} {estado_b}</td></tr>
+              </table>
+            </div>""", unsafe_allow_html=True)
+
+        with c2:
+            estado_a = "CUADRA" if abs(dif_a) < 1 else "REVISAR"
+            color_a  = "#e8f5e9" if abs(dif_a) < 1 else "#fce4ec"
+            borde_a  = "#2e7d32" if abs(dif_a) < 1 else "#c62828"
+            st.markdown(f"""
+            <div style='background:{color_a};border-left:4px solid {borde_a};border-radius:8px;padding:16px 20px;'>
+              <b style='font-size:1rem;'>II. Saldo segun Auxiliar Contable</b>
+              <table style='width:100%;margin-top:10px;font-size:.9rem;border-collapse:collapse;'>
+                <tr><td>Saldo inicial</td><td style='text-align:right;'><b>{cop(si_a)}</b></td></tr>
+                <tr><td>(+) Total debitos</td><td style='text-align:right;'><b>{cop(td_a)}</b></td></tr>
+                <tr><td>(-) Total creditos</td><td style='text-align:right;'><b>{cop(tc_a)}</b></td></tr>
+                <tr style='border-top:2px solid {borde_a};'><td><b>(=) Saldo calculado</b></td><td style='text-align:right;'><b>{cop(calc_aux)}</b></td></tr>
+                <tr><td>(=) Saldo final declarado</td><td style='text-align:right;'><b>{cop(sf_a)}</b></td></tr>
+                <tr><td><b>Diferencia</b></td><td style='text-align:right;font-weight:800;'>{cop(dif_a)} {estado_a}</td></tr>
+              </table>
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        color_ds = "#e8f5e9" if abs(dif_saldos) < 1 else "#fce4ec"
+        borde_ds = "#2e7d32" if abs(dif_saldos) < 1 else "#c62828"
+        estado_ds = "Saldos iguales — conciliacion perfecta" if abs(dif_saldos) < 1 else f"Diferencia de {cop(abs(dif_saldos))} entre banco y auxiliar"
+        st.markdown(f"""
+        <div style='background:{color_ds};border-left:4px solid {borde_ds};border-radius:8px;padding:16px 20px;'>
+          <b style='font-size:1rem;'>III. Diferencia Neta Banco vs Auxiliar</b>
+          <table style='width:100%;margin-top:10px;font-size:.9rem;border-collapse:collapse;'>
+            <tr><td>Saldo banco (final)</td><td style='text-align:right;'><b>{cop(sac)}</b></td></tr>
+            <tr><td>Saldo auxiliar (final)</td><td style='text-align:right;'><b>{cop(sf_a)}</b></td></tr>
+            <tr style='border-top:2px solid {borde_ds};'><td><b>DIFERENCIA NETA</b></td><td style='text-align:right;font-weight:800;'>{cop(dif_saldos)}</td></tr>
+            <tr><td>Abonos banco vs Debitos auxiliar</td><td style='text-align:right;'>{cop(tab_s - td_a)}</td></tr>
+            <tr><td>Cargos banco vs Creditos auxiliar</td><td style='text-align:right;'>{cop(tca_s - tc_a)}</td></tr>
+          </table>
+          <div style='margin-top:10px;font-weight:700;'>{estado_ds}</div>
+        </div>""", unsafe_allow_html=True)
 
         if not df_aux.empty:
-            st.markdown("---")
-            st.subheader("IV. Composición de la Diferencia (Análisis de Conciliación)")
-            val_sin_aux  = s_banco['VALOR_BANCO'].sum() if not s_banco.empty else 0
-            val_sin_banco_deb = df_solo_aux['DEBITO'].sum()  if not df_solo_aux.empty else 0
-            val_sin_banco_cre = df_solo_aux['CREDITO'].sum() if not df_solo_aux.empty else 0
-            st.text(f"Monto banco sin registro auxiliar:    {cop(val_sin_aux)}")
-            st.text(f"Monto aux. Débito sin banco:          {cop(val_sin_banco_deb)}")
-            st.text(f"Monto aux. Crédito sin banco:         {cop(val_sin_banco_cre)}")
-            st.text(f"Tasa de conciliación:                 {pct_conc:.1f}%")
+            val_sin_aux       = s_banco["VALOR_BANCO"].sum()   if not s_banco.empty    else 0
+            val_sin_banco_deb = df_solo_aux["DEBITO"].sum()    if not df_solo_aux.empty else 0
+            val_sin_banco_cre = df_solo_aux["CREDITO"].sum()   if not df_solo_aux.empty else 0
+            ico2, lbl2, cls2 = _semaforo_conciliacion(pct_conc)
+            badge_cls2 = "badge-verde" if pct_conc >= 90 else "badge-naranja"
 
-        st.markdown("---")
-        st.markdown("**CARLOS ANDRÉS SILVA VELA**    **FERNANDO CUCALÓN SÁNCHEZ**")
-        st.markdown("REPRESENTANTE LEGAL         CONTADOR")
-        st.markdown("C.C. 1061717925             T.P. 23049-T")
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class='callout-info'>
+              <b>IV. Composicion de la Diferencia y Conclusion Auditora</b><br>
+              Monto banco sin registro auxiliar: <b>{cop(val_sin_aux)}</b><br>
+              Monto auxiliar debito sin banco: <b>{cop(val_sin_banco_deb)}</b><br>
+              Monto auxiliar credito sin banco: <b>{cop(val_sin_banco_cre)}</b><br>
+              Tasa de conciliacion: <span class='{badge_cls2}'>{ico2} {pct_conc:.1f}% — {lbl2}</span><br><br>
+              <b>Conclusion:</b> La presente conciliacion bancaria fue elaborada con base en el extracto Bancolombia
+              y el auxiliar contable cuenta 1120.05.01 del periodo. Tasa de conciliacion {pct_conc:.1f}% —
+              {"los registros se encuentran en orden." if pct_conc >= 90
+               else "existen diferencias que requieren revision contable antes del cierre."}
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("""
+        <div style='display:flex;gap:40px;padding:20px;background:#f8f9fa;border-radius:10px;border:1px solid #e0e0e0;'>
+          <div style='flex:1;text-align:center;border-right:1px solid #ccc;padding-right:20px;'>
+            <div style='font-weight:800;font-size:1rem;color:#1565C0;'>CARLOS ANDRES SILVA VELA</div>
+            <div style='font-size:.85rem;color:#546e7a;'>REPRESENTANTE LEGAL</div>
+            <div style='font-size:.8rem;color:#78909c;margin-top:4px;'>C.C. 1061717925</div>
+          </div>
+          <div style='flex:1;text-align:center;padding-left:20px;'>
+            <div style='font-weight:800;font-size:1rem;color:#1565C0;'>FERNANDO CUCALON SANCHEZ</div>
+            <div style='font-size:.85rem;color:#546e7a;'>CONTADOR PUBLICO</div>
+            <div style='font-size:.8rem;color:#78909c;margin-top:4px;'>T.P. 23049-T</div>
+          </div>
+        </div>""", unsafe_allow_html=True)
+
 
     with tab7:
-        st.header("Visualizaciones")
-        plt.rcParams.update({'font.family': 'DejaVu Sans', 'figure.dpi': 110})
+        st.markdown("<div class='section-title'>Visualizaciones</div>", unsafe_allow_html=True)
+        plt.rcParams.update({"font.family": "DejaVu Sans", "figure.dpi": 110})
         fig, axes = plt.subplots(2, 3, figsize=(22, 12))
-        fig.suptitle('CREDIEXPRESS POPAYAN SAS — Conciliación Bancaria Enero 2025',
-                     fontsize=14, fontweight='bold', y=1.01)
+        fig.suptitle("CREDIEXPRESS POPAYAN SAS — Conciliacion Bancaria",
+                     fontsize=14, fontweight="bold", y=1.01)
 
-        # G1
+        # G1 — Evolucion del saldo
         ax1 = axes[0, 0]
-        df_s = df_banco[df_banco['SALDO'].notna()].copy()
+        df_s = df_banco[df_banco["SALDO"].notna()].copy()
         if not df_s.empty:
-            ax1.plot(range(len(df_s)), df_s['SALDO']/1e6, color='#1565C0', lw=1.2)
-            ax1.fill_between(range(len(df_s)), df_s['SALDO']/1e6, alpha=0.12, color='#1565C0')
-        ax1.set_title('Evolución del Saldo Bancario', fontweight='bold')
-        ax1.set_ylabel('Millones COP')
-        ax1.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'${x:.0f}M'))
+            ax1.plot(range(len(df_s)), df_s["SALDO"]/1e6, color="#1565C0", lw=1.2)
+            ax1.fill_between(range(len(df_s)), df_s["SALDO"]/1e6, alpha=0.12, color="#1565C0")
+        ax1.set_title("Evolucion del Saldo Bancario", fontweight="bold")
+        ax1.set_ylabel("Millones COP")
+        ax1.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:.0f}M"))
         ax1.grid(True, alpha=0.3)
 
-        # G2
+        # G2 — Pastel estado conciliacion
         ax2 = axes[0, 1]
         if n_tot > 0:
-            cont = df_comp['ESTADO'].value_counts()
+            cont = df_comp["ESTADO"].value_counts()
             color_map = {
-                '✅ COINCIDE EXACTO': '#4CAF50',
-                '🔶 COINCIDE APROX.': '#FFC107',
-                '❌ SOLO EN BANCO':   '#F44336',
+                "COINCIDE EXACTO": "#4CAF50",
+                "COINCIDE APROX.": "#FFC107",
+                "SOLO EN BANCO":   "#F44336",
             }
-            cs = [color_map.get(e, '#9E9E9E') for e in cont.index]
-            lbl = [e + ' (' + str(v) + ')' for e, v in zip(cont.index, cont.values)]
-            ax2.pie(cont.values, labels=lbl, colors=cs, autopct='%1.0f%%', startangle=90,
-                    textprops={'fontsize': 8})
-        ax2.set_title('Estado Conciliacion', fontweight='bold')
+            cs  = [next((v for k, v in color_map.items() if k in e), "#9E9E9E") for e in cont.index]
+            lbl = [e + " (" + str(v) + ")" for e, v in zip(cont.index, cont.values)]
+            ax2.pie(cont.values, labels=lbl, colors=cs, autopct="%1.0f%%", startangle=90,
+                    textprops={"fontsize": 8})
+        ax2.set_title("Estado Conciliacion", fontweight="bold")
 
-        # G3
+        # G3 — Barras Banco vs Auxiliar
         ax3 = axes[0, 2]
-        cats  = ['Entradas\nBanco', 'Debitos\nAuxiliar', 'Salidas\nBanco', 'Creditos\nAuxiliar']
+        cats  = ["Entradas\nBanco", "Debitos\nAuxiliar", "Salidas\nBanco", "Creditos\nAuxiliar"]
         vals3 = [tab_s/1e6, td_a/1e6, tca_s/1e6, tc_a/1e6]
-        cols3 = ['#2196F3', '#4CAF50', '#F44336', '#FF9800']
+        cols3 = ["#2196F3", "#4CAF50", "#F44336", "#FF9800"]
         bars3 = ax3.bar(cats, vals3, color=cols3, alpha=0.85)
-        ax3.set_title('Totales: Banco vs Auxiliar', fontweight='bold')
-        ax3.set_ylabel('Millones COP')
-        ax3.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'${x:.0f}M'))
+        ax3.set_title("Totales: Banco vs Auxiliar", fontweight="bold")
+        ax3.set_ylabel("Millones COP")
+        ax3.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:.0f}M"))
         for b, v in zip(bars3, vals3):
             ax3.text(b.get_x() + b.get_width()/2, b.get_height() + 1,
-                     f'${v:.0f}M', ha='center', fontsize=8, fontweight='bold')
-        ax3.grid(True, axis='y', alpha=0.3)
+                     f"${v:.0f}M", ha="center", fontsize=8, fontweight="bold")
+        ax3.grid(True, axis="y", alpha=0.3)
 
-        # G4
+        # G4 — Movimientos por dia
         ax4 = axes[1, 0]
         if not df_banco.empty:
-            df_banco['DIA'] = df_banco['FECHA_RAW'].apply(
-                lambda x: int(str(x).split('/')[0]) if '/' in str(x) else 0)
-            por_dia = df_banco.groupby(['DIA', 'TIPO'])['VALOR'].sum().unstack(fill_value=0)
-            if 'ABONO' in por_dia.columns:
-                ax4.bar(por_dia.index, por_dia['ABONO']/1e6,
-                        label='Abonos (+)', color='#2E7D32', alpha=0.8)
-            if 'CARGO' in por_dia.columns:
-                ax4.bar(por_dia.index, por_dia['CARGO'].abs()/1e6,
-                        label='Cargos (-)', color='#C62828', alpha=0.7)
-        ax4.set_title('Movimientos por Dia', fontweight='bold')
-        ax4.set_xlabel('Dia de Enero')
-        ax4.set_ylabel('Millones COP')
-        ax4.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'${x:.0f}M'))
+            df_banco["DIA"] = df_banco["FECHA_RAW"].apply(
+                lambda x: int(str(x).split("/")[0]) if "/" in str(x) else 0)
+            por_dia = df_banco.groupby(["DIA", "TIPO"])["VALOR"].sum().unstack(fill_value=0)
+            if "ABONO" in por_dia.columns:
+                ax4.bar(por_dia.index, por_dia["ABONO"]/1e6,
+                        label="Abonos (+)", color="#2E7D32", alpha=0.8)
+            if "CARGO" in por_dia.columns:
+                ax4.bar(por_dia.index, por_dia["CARGO"].abs()/1e6,
+                        label="Cargos (-)", color="#C62828", alpha=0.7)
+        ax4.set_title("Movimientos por Dia", fontweight="bold")
+        ax4.set_xlabel("Dia del Mes")
+        ax4.set_ylabel("Millones COP")
+        ax4.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:.0f}M"))
         ax4.legend(fontsize=8)
-        ax4.grid(True, axis='y', alpha=0.3)
+        ax4.grid(True, axis="y", alpha=0.3)
 
-        # G5
+        # G5 — Asientos por tipo de comprobante
         ax5 = axes[1, 1]
         if not df_aux.empty:
-            tipo_cnt = df_aux['DOCUMENTO'].str[:2].value_counts()
-            cols5 = ['#4CAF50', '#2196F3', '#FF9800'][:len(tipo_cnt)]
+            tipo_cnt = df_aux["DOCUMENTO"].str[:2].value_counts()
+            cols5 = ["#4CAF50", "#2196F3", "#FF9800", "#9C27B0", "#F44336", "#00BCD4"][:len(tipo_cnt)]
             bars5 = ax5.bar(tipo_cnt.index, tipo_cnt.values, color=cols5)
-            ax5.set_title('Asientos por Tipo (Auxiliar)', fontweight='bold')
-            ax5.set_ylabel('N asientos')
+            ax5.set_title("Asientos por Tipo (Auxiliar)", fontweight="bold")
+            ax5.set_ylabel("N asientos")
             for b, v in zip(bars5, tipo_cnt.values):
                 ax5.text(b.get_x() + b.get_width()/2, b.get_height() + 1,
-                         str(v), ha='center', fontsize=9, fontweight='bold')
-            ax5.grid(True, axis='y', alpha=0.3)
+                         str(v), ha="center", fontsize=9, fontweight="bold")
+            ax5.grid(True, axis="y", alpha=0.3)
         else:
-            ax5.text(0.5, 0.5, 'Sin datos auxiliar', ha='center', va='center', fontsize=12)
-            ax5.set_title('Asientos por Tipo (Auxiliar)', fontweight='bold')
+            ax5.text(0.5, 0.5, "Sin datos auxiliar", ha="center", va="center", fontsize=12)
+            ax5.set_title("Asientos por Tipo (Auxiliar)", fontweight="bold")
 
-        # G6
+        # G6 — Valor por estado conciliacion
         ax6 = axes[1, 2]
         if n_tot > 0:
-            ve = exactas['VALOR_BANCO'].abs().sum()/1e6 if not exactas.empty else 0
-            va = aprox['VALOR_BANCO'].abs().sum()/1e6 if not aprox.empty else 0
-            vs = s_banco['VALOR_BANCO'].abs().sum()/1e6 if not s_banco.empty else 0
-            vx = (df_solo_aux['DEBITO'].fillna(0).sum() + df_solo_aux['CREDITO'].fillna(0).sum())/1e6 if not df_solo_aux.empty else 0
-            lbl6 = ['Exacto', 'Aprox.', 'Solo\nbanco', 'Solo\nauxiliar']
+            ve = exactas["VALOR_BANCO"].abs().sum()/1e6 if not exactas.empty else 0
+            va = aprox["VALOR_BANCO"].abs().sum()/1e6   if not aprox.empty   else 0
+            vs = s_banco["VALOR_BANCO"].abs().sum()/1e6 if not s_banco.empty else 0
+            vx = (df_solo_aux["DEBITO"].fillna(0).sum() + df_solo_aux["CREDITO"].fillna(0).sum())/1e6 if not df_solo_aux.empty else 0
+            lbl6 = ["Exacto", "Aprox.", "Solo\nbanco", "Solo\nauxiliar"]
             val6 = [ve, va, vs, vx]
-            col6 = ['#4CAF50', '#FFC107', '#F44336', '#2196F3']
+            col6 = ["#4CAF50", "#FFC107", "#F44336", "#2196F3"]
             bars6 = ax6.bar(lbl6, val6, color=col6, alpha=0.85)
-            ax6.set_title('Valor por Estado Conciliacion', fontweight='bold')
-            ax6.set_ylabel('Millones COP')
-            ax6.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'${x:.0f}M'))
+            ax6.set_title("Valor por Estado Conciliacion", fontweight="bold")
+            ax6.set_ylabel("Millones COP")
+            ax6.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:.0f}M"))
             for b, v in zip(bars6, val6):
                 ax6.text(b.get_x() + b.get_width()/2, b.get_height() + 0.5,
-                         f'${v:.1f}M', ha='center', fontsize=8, fontweight='bold')
-            ax6.grid(True, axis='y', alpha=0.3)
+                         f"${v:.1f}M", ha="center", fontsize=8, fontweight="bold")
+            ax6.grid(True, axis="y", alpha=0.3)
 
         plt.tight_layout()
         st.pyplot(fig)
 
-    with tab8:
-        st.header("Exportar a Excel (8 Hojas Premium)")
-        nombre_salida = 'CREDIEXPRESS_Conciliacion_Enero2025.xlsx'
+        # Comentario textual debajo de los graficos
+        st.markdown("<div class='section-title'>Interpretacion de los Graficos</div>", unsafe_allow_html=True)
+        ico_v, lbl_v, _ = _semaforo_conciliacion(pct_conc)
+        st.markdown(f"""
+        <div class='callout-info'>
+          <b>G1 — Evolucion del Saldo:</b> Muestra como vario el saldo bancario durante el periodo.
+          Una linea estable indica flujo predecible; caidas o picos bruscos requieren revision.<br><br>
+          <b>G2 — Estado de Conciliacion:</b> {ico_v} <b>{pct_conc:.1f}%</b> de los movimientos estan conciliados ({lbl_v}).
+          El {100-pct_conc:.1f}% restante esta pendiente de revisionar.<br><br>
+          <b>G3 — Banco vs Auxiliar:</b> Compara los totales de entradas/salidas entre el extracto y el auxiliar.
+          Barras parejas indican registros completos; barras desiguales apuntan a diferencias.<br><br>
+          <b>G4 — Movimientos por Dia:</b> Identifica dias de mayor actividad bancaria.
+          Picos de debitos o creditos en fechas especificas pueden indicar pagos masivos o recaudos.<br><br>
+          <b>G5 — Tipo de Comprobante:</b> Distribucion de asientos por prefijo de documento (NC=notas credito, CE=comprobantes egreso, etc.).<br><br>
+          <b>G6 — Valor por Estado:</b> Muestra el valor monetario en cada categoria de conciliacion.
+          El mayor valor debe estar en "Exacto"; valores altos en "Solo banco" o "Solo auxiliar" requieren atencion.
+        </div>""", unsafe_allow_html=True)
 
-        FILL_VERDE    = PatternFill('solid', fgColor='C8F7C5')
-        FILL_AMARILLO = PatternFill('solid', fgColor='FFF3CD')
-        FILL_ROJO     = PatternFill('solid', fgColor='F7C5C5')
-        FILL_AZUL     = PatternFill('solid', fgColor='D0E8FF')
-        FILL_HEADER   = PatternFill('solid', fgColor='1565C0')
-        FONT_HEADER   = Font(bold=True, color='FFFFFF', size=10)
+    with tab8:
+        st.markdown("<div class='section-title'>Exportar a Excel</div>", unsafe_allow_html=True)
+        st.markdown("""
+        <div class='callout-info'>
+          El archivo Excel contiene <b>8 hojas</b> con toda la informacion del analisis:
+          Comparacion completa, Coincidencias exactas, Aproximadas, Solo en banco, Solo en auxiliar,
+          Datos completos del extracto, Datos completos del auxiliar y Resumen ejecutivo.
+        </div>""", unsafe_allow_html=True)
+
+        nombre_salida = "CREDIEXPRESS_Conciliacion.xlsx"
+
+        FILL_VERDE    = PatternFill("solid", fgColor="C8F7C5")
+        FILL_AMARILLO = PatternFill("solid", fgColor="FFF3CD")
+        FILL_ROJO     = PatternFill("solid", fgColor="F7C5C5")
+        FILL_AZUL     = PatternFill("solid", fgColor="D0E8FF")
+        FILL_HEADER   = PatternFill("solid", fgColor="1565C0")
+        FONT_HEADER   = Font(bold=True, color="FFFFFF", size=10)
 
         def estilizar_hoja(ws):
             for cell in ws[1]:
                 cell.fill = FILL_HEADER
                 cell.font = FONT_HEADER
-                cell.alignment = Alignment(horizontal='center', vertical='center')
+                cell.alignment = Alignment(horizontal="center", vertical="center")
             for col in ws.columns:
-                mx = max((len(str(c.value or '')) for c in col), default=10)
+                mx = max((len(str(c.value or "")) for c in col), default=10)
                 ws.column_dimensions[get_column_letter(col[0].column)].width = min(mx + 3, 55)
 
         def colorear_por_estado(ws, col_estado_idx):
             for row in ws.iter_rows(min_row=2):
-                val = str(row[col_estado_idx - 1].value or '')
-                fill = (FILL_VERDE    if '✅' in val else
-                        FILL_AMARILLO if '🔶' in val else
-                        FILL_ROJO     if '❌' in val else
-                        FILL_AZUL     if '📋' in val else None)
+                val = str(row[col_estado_idx - 1].value or "")
+                fill = (FILL_VERDE    if "COINCIDE EXACTO" in val else
+                        FILL_AMARILLO if "COINCIDE APROX"  in val else
+                        FILL_ROJO     if "SOLO EN BANCO"   in val else
+                        FILL_AZUL     if "SOLO EN AUXILIAR" in val else None)
                 if fill:
                     for cell in row:
                         cell.fill = fill
 
         output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Hoja 1
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
             if not df_aux.empty:
-                h1 = df_comp[['N','FECHA_BANCO','TIPO_MOV','DESCRIPCION','VALOR_BANCO',
-                               'DOC_AUXILIAR','FECHA_AUXILIAR','CONCEPTO_AUX','MONTO_AUXILIAR',
-                               'DIFERENCIA','ESTADO']].copy()
-                h1.columns = ['N','Fecha_Banco','Tipo','Descripcion_Banco','Valor_Banco',
-                              'Doc_Auxiliar','Fecha_Auxiliar','Concepto_Auxiliar','Monto_Auxiliar',
-                              'Diferencia','Estado']
+                h1 = df_comp[["N","FECHA_BANCO","TIPO_MOV","DESCRIPCION","VALOR_BANCO",
+                               "DOC_AUXILIAR","FECHA_AUXILIAR","CONCEPTO_AUX","MONTO_AUXILIAR",
+                               "DIFERENCIA","ESTADO"]].copy()
+                h1.columns = ["N","Fecha_Banco","Tipo","Descripcion_Banco","Valor_Banco",
+                              "Doc_Auxiliar","Fecha_Auxiliar","Concepto_Auxiliar","Monto_Auxiliar",
+                              "Diferencia","Estado"]
             else:
-                h1 = pd.DataFrame({'Info': ['Sin comparación']})
-            h1.to_excel(writer, sheet_name='1_Comparacion_Completa', index=False)
+                h1 = pd.DataFrame({"Info": ["Sin comparacion"]})
+            h1.to_excel(writer, sheet_name="1_Comparacion_Completa", index=False)
 
             for estado, nombre in [
-                ('✅ COINCIDE EXACTO', '2_Coincidencias_Exactas'),
-                ('🔶 COINCIDE APROX.', '3_Coincidencias_Aprox'),
-                ('❌ SOLO EN BANCO',   '4_Solo_Banco_Sin_Auxiliar'),
+                ("COINCIDE EXACTO", "2_Coincidencias_Exactas"),
+                ("COINCIDE APROX.", "3_Coincidencias_Aprox"),
+                ("SOLO EN BANCO",   "4_Solo_Banco_Sin_Auxiliar"),
             ]:
-                sub = df_comp[df_comp['ESTADO'] == estado].copy() if not df_aux.empty else pd.DataFrame()
-                if sub.empty: sub = pd.DataFrame({'Info': ['Sin registros']})
+                sub = df_comp[df_comp["ESTADO"].str.contains(estado, na=False)].copy() if not df_aux.empty else pd.DataFrame()
+                if sub.empty: sub = pd.DataFrame({"Info": ["Sin registros"]})
                 sub.to_excel(writer, sheet_name=nombre, index=False)
 
             if not df_solo_aux.empty:
-                df_solo_aux.to_excel(writer, sheet_name='5_Solo_Auxiliar_Sin_Banco', index=False)
+                df_solo_aux.to_excel(writer, sheet_name="5_Solo_Auxiliar_Sin_Banco", index=False)
             else:
-                pd.DataFrame({'Info': ['Todos los asientos tienen movimiento bancario']}).to_excel(
-                    writer, sheet_name='5_Solo_Auxiliar_Sin_Banco', index=False)
+                pd.DataFrame({"Info": ["Todos los asientos tienen movimiento bancario"]}).to_excel(
+                    writer, sheet_name="5_Solo_Auxiliar_Sin_Banco", index=False)
 
-            df_banco.to_excel(writer, sheet_name='6_Extracto_Banco_Completo', index=True)
-            df_aux.to_excel(writer, sheet_name='7_Auxiliar_Contable_Completo', index=True)
+            df_banco.to_excel(writer, sheet_name="6_Extracto_Banco_Completo", index=True)
+            df_aux.to_excel(writer, sheet_name="7_Auxiliar_Contable_Completo", index=True)
 
             resumen_data = {
-                'Concepto': [
-                    'Archivo banco', 'Archivo auxiliar',
-                    'Saldo inicial banco', 'Saldo final banco',
-                    'Total abonos banco', 'Total cargos banco',
-                    'Saldo inicial auxiliar', 'Saldo final auxiliar',
-                    'Total debitos auxiliar', 'Total creditos auxiliar',
-                    'Diferencia saldos finales',
-                    'Movimientos analizados', 'Coincidencias exactas',
-                    'Coincidencias aprox.', 'Solo en banco', 'Solo en auxiliar',
-                    'Tasa de conciliacion %',
+                "Concepto": [
+                    "Archivo banco", "Archivo auxiliar",
+                    "Saldo inicial banco", "Saldo final banco",
+                    "Total abonos banco", "Total cargos banco",
+                    "Saldo inicial auxiliar", "Saldo final auxiliar",
+                    "Total debitos auxiliar", "Total creditos auxiliar",
+                    "Diferencia saldos finales",
+                    "Movimientos analizados", "Coincidencias exactas",
+                    "Coincidencias aprox.", "Solo en banco", "Solo en auxiliar",
+                    "Tasa de conciliacion %",
                 ],
-                'Valor': [
+                "Valor": [
                     banco_file.name, aux_file.name,
                     sa, sac, tab_s, tca_s,
                     si_a, sf_a, td_a, tc_a,
@@ -1380,22 +1779,38 @@ if 'run' in st.session_state and st.session_state.run:
                     round(pct_conc, 1),
                 ]
             }
-            pd.DataFrame(resumen_data).to_excel(writer, sheet_name='8_Resumen_Conciliacion', index=False)
+            pd.DataFrame(resumen_data).to_excel(writer, sheet_name="8_Resumen_Conciliacion", index=False)
 
             wb = writer.book
             for sname in wb.sheetnames:
                 ws = wb[sname]
                 estilizar_hoja(ws)
-            if '1_Comparacion_Completa' in wb.sheetnames and not df_aux.empty:
-                ws1 = wb['1_Comparacion_Completa']
+            if "1_Comparacion_Completa" in wb.sheetnames and not df_aux.empty:
+                ws1 = wb["1_Comparacion_Completa"]
                 colorear_por_estado(ws1, 11)
 
         output.seek(0)
-        st.download_button(
-            label="📥 Descargar Excel Premium",
-            data=output,
-            file_name=nombre_salida,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
 
-    st.success("✅ Conciliación completada exitosamente")
+        col_dl, col_info = st.columns([1, 2])
+        with col_dl:
+            st.download_button(
+                label="Descargar Excel Premium",
+                data=output,
+                file_name=nombre_salida,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        with col_info:
+            st.markdown(f"""
+            <div class='callout-success'>
+              Archivo listo: <b>{nombre_salida}</b><br>
+              Movimientos banco: <b>{len(df_banco)}</b> &nbsp;|&nbsp;
+              Asientos auxiliar: <b>{len(df_aux)}</b> &nbsp;|&nbsp;
+              Conciliacion: <b>{pct_conc:.1f}%</b>
+            </div>""", unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class='callout-success' style='margin-top:20px;'>
+      <b>Analisis completado exitosamente.</b>
+      Revise las pestanas para el detalle completo. Descargue el Excel para el archivo oficial.
+    </div>""", unsafe_allow_html=True)

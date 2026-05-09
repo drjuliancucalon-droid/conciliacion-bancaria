@@ -1692,7 +1692,7 @@ if 'run' in st.session_state and st.session_state.run:
                       Abonos sin asiento: <b>{_cop_limpio(abonos_sb['VALOR_BANCO'].sum())}</b> ({len(abonos_sb)} trans.)
                       &nbsp;·&nbsp;
                       Cargos sin asiento: <b>{_cop_limpio(cargos_sb['VALOR_BANCO'].sum())}</b> ({len(cargos_sb)} trans.)<br>
-                      <b>Valor total no registrado: {_cop_limpio(tot_sb)}</b>
+                      <b>Valor bruto no registrado: ${bruto_sb:,.0f} COP</b>
                     </div>""", unsafe_allow_html=True)
 
                     st.markdown("""

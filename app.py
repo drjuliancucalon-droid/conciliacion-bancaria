@@ -1606,43 +1606,51 @@ def comparar_documentos(df_b, df_a):
     if df_b.empty or df_a.empty:
         return pd.DataFrame(), df_a.copy() if not df_a.empty else pd.DataFrame()
 
-    # Pre-computar prefijo numérico en el auxiliar (Fase B)
+    # ── Pre-cómputo ÚNICO antes del loop principal ───────────────────────────
     df_a = df_a.copy()
-    df_a['_PREFIJO'] = df_a['DOCUMENTO'].apply(_prefijo_doc)
+    df_a['_PREFIJO']  = df_a['DOCUMENTO'].apply(_prefijo_doc)
     df_a['_NUMERICO'] = df_a['DOCUMENTO'].apply(_num_doc)
 
-    # ── Fase D: precargar catálogo NC UNA sola vez (evita 72k conexiones SQLite) ──
+    # Tokenizar conceptos auxiliares UNA SOLA VEZ (evita 1M+ re.findall)
+    _STOP_SIM = {'de','la','el','en','a','y','con','por','para','del','un','una',
+                 'los','las','al','se','su','que','no','es','pago','transferencia'}
+    def _tok(s):
+        return frozenset(
+            w for w in re.findall(r'[a-z0-9]{3,}', (s or '').lower())
+            if w not in _STOP_SIM
+        )
+    df_a['_CONC_TOK'] = df_a['CONCEPTO'].fillna('').apply(_tok)
+
+    # Catálogo NC: cargar en memoria UNA vez
     _catalogo_nc_cache = []
     try:
         if os.path.exists(DB_PATH):
-            _conn_cat = sqlite3.connect(DB_PATH)
-            _catalogo_nc_cache = _conn_cat.execute(
+            _cn = sqlite3.connect(DB_PATH)
+            _catalogo_nc_cache = _cn.execute(
                 "SELECT banco_tokens, aux_tokens FROM nc_catalogo "
-                "WHERE nivel IN ('ALTA','MEDIA') ORDER BY confirmaciones DESC LIMIT 200"
+                "WHERE nivel IN ('ALTA','MEDIA') LIMIT 200"
             ).fetchall()
-            _conn_cat.close()
+            _cn.close()
     except Exception:
         _catalogo_nc_cache = []
 
-    def _cat_sim_memoria(banco_desc, aux_concepto):
-        """Similitud contra catálogo NC usando datos ya cargados en memoria."""
-        if not _catalogo_nc_cache:
-            return 0.0
-        bt = _extraer_tokens_nc(banco_desc)
-        at = _extraer_tokens_nc(aux_concepto)
-        mejor = 0.0
-        for bt_j, at_j in _catalogo_nc_cache:
-            try:
-                sim = (_similitud_tokens_nc(bt, json.loads(bt_j or '[]')) +
-                       _similitud_tokens_nc(at, json.loads(at_j or '[]'))) / 2
-                if sim > mejor:
-                    mejor = sim
-            except Exception:
-                pass
-        return mejor
+    # Pre-parsear tokens del catálogo NC (evita json.loads en el loop)
+    _cat_parsed = []
+    for _bt_j, _at_j in _catalogo_nc_cache:
+        try:
+            _cat_parsed.append((
+                frozenset(json.loads(_bt_j or '[]')),
+                frozenset(json.loads(_at_j or '[]'))
+            ))
+        except Exception:
+            pass
+
+    def _jaccard(a, b):
+        if not a or not b: return 0.0
+        return len(a & b) / len(a | b)
 
     idx_usados = set()
-    filas = []
+    filas      = []
 
     for idx_b, row_b in df_b.iterrows():
         vb = row_b['VALOR']
@@ -1652,61 +1660,61 @@ def comparar_documentos(df_b, df_a):
         monto_abs  = abs(vb)
         desc_banco = str(row_b.get('DESCRIPCION', '') or '')
 
-        # ── Fase A: determinar candidatos por tipo de movimiento ──────────
-        es_abono = vb >= 0   # abono bancario → corresponde a CG- (débito contable)
-        es_cargo = vb < 0    # cargo bancario  → corresponde a CE- / NC- (crédito contable)
+        # Tokens de la descripción bancaria (calculados UNA vez por fila banco)
+        banco_tok = _tok(desc_banco)
 
-        libres_todos = df_a[~df_a.index.isin(idx_usados)].copy()
+        # ── Fase A: filtrar candidatos por tipo ───────────────────────────
+        es_abono = vb >= 0
+        libres   = df_a[~df_a.index.isin(idx_usados)]
 
         if es_abono:
-            # CG- y CON- van en columna DÉBITO → abonos en cuenta
-            col_buscar  = 'DEBITO'
-            candidatos  = libres_todos[
-                libres_todos['_PREFIJO'].isin(['CG', 'CON']) &
-                libres_todos[col_buscar].notna()
-            ].copy()
+            col_buscar = 'DEBITO'
+            candidatos = libres[
+                libres['_PREFIJO'].isin(['CG','CON']) & libres[col_buscar].notna()
+            ]
             if candidatos.empty:
-                # fallback: cualquier registro con DEBITO si no hay CG/CON
-                candidatos = libres_todos[libres_todos[col_buscar].notna()].copy()
+                candidatos = libres[libres[col_buscar].notna()]
         else:
-            # CE- y NC- van en columna CRÉDITO → cargos / egresos
-            col_buscar  = 'CREDITO'
-            candidatos  = libres_todos[
-                libres_todos['_PREFIJO'].isin(['CE', 'NC']) &
-                libres_todos[col_buscar].notna()
-            ].copy()
+            col_buscar = 'CREDITO'
+            candidatos = libres[
+                libres['_PREFIJO'].isin(['CE','NC']) & libres[col_buscar].notna()
+            ]
             if candidatos.empty:
-                candidatos = libres_todos[libres_todos[col_buscar].notna()].copy()
+                candidatos = libres[libres[col_buscar].notna()]
+
+        candidatos = candidatos.copy()
 
         match_tipo = match_monto = match_idx = None
-        match_doc = match_conc = match_fecha_aux = ''
+        match_doc  = match_conc = match_fecha_aux = ''
         match_metodo = ''
 
         if not candidatos.empty:
             candidatos['_diff'] = (candidatos[col_buscar] - monto_abs).abs()
 
-            # ── Fase B: bonus si el número de doc aparece en descripción bancaria ──
-            # Vectorizado: comparar string en string sin apply(axis=1)
-            _num_series = candidatos['_NUMERICO'].fillna('')
-            candidatos['_doc_bonus'] = _num_series.apply(
+            # ── Fase B: doc-num bonus (vectorizado) ───────────────────────
+            candidatos['_doc_bonus'] = candidatos['_NUMERICO'].apply(
                 lambda n: 1 if n and n in desc_banco else 0
             )
 
-            # ── Similitud de concepto (Series.apply — axis=0, mucho más rápido) ─
-            candidatos['_sim'] = candidatos['CONCEPTO'].fillna('').apply(
-                lambda c: _score_concepto(desc_banco, c)
+            # ── Similitud concepto con tokens PRE-computados ──────────────
+            candidatos['_sim'] = candidatos['_CONC_TOK'].apply(
+                lambda t: _jaccard(banco_tok, t)
             )
 
-            # ── Fase D: bonus catálogo NC — vectorizado, sin apply(axis=1) ──────
+            # ── Fase D: catálogo NC (solo si hay reglas y solo NC-) ───────
             candidatos['_cat_sim'] = 0.0
-            if _catalogo_nc_cache:
+            if _cat_parsed:
                 _nc_mask = candidatos['_PREFIJO'] == 'NC'
                 if _nc_mask.any():
-                    candidatos.loc[_nc_mask, '_cat_sim'] = (
-                        candidatos.loc[_nc_mask, 'CONCEPTO'].apply(
-                            lambda c: _cat_sim_memoria(desc_banco, str(c or ''))
-                        )
-                    )
+                    def _nc_cat_sim(aux_tok):
+                        mejor = 0.0
+                        for bt, at in _cat_parsed:
+                            s = (_jaccard(banco_tok, bt) + _jaccard(aux_tok, at)) / 2
+                            if s > mejor:
+                                mejor = s
+                        return mejor
+                    candidatos.loc[_nc_mask, '_cat_sim'] = \
+                        candidatos.loc[_nc_mask, '_CONC_TOK'].apply(_nc_cat_sim)
 
             # ── Score combinado ───────────────────────────────────────────────
             exactos = candidatos[candidatos['_diff'] <= TOL_EXACTA].copy()

@@ -1716,7 +1716,7 @@ def comparar_documentos(df_b, df_a):
             if pd.notna(_fecha_b) and 'FECHA' in candidatos.columns:
                 candidatos['_fecha_bonus'] = candidatos['FECHA'].apply(
                     lambda f: 0.15 if (pd.notna(f) and
-                        abs((pd.Timestamp(f) - pd.Timestamp(_fecha_b)).days) <= 5)
+                        abs((pd.Timestamp(f) - pd.Timestamp(_fecha_b)).days) <= 10)
                     else 0.0
                 )
             else:
@@ -1835,10 +1835,10 @@ def comparar_documentos(df_b, df_a):
     # Se muestra como '🔄 RECHAZO — CONFIRMAR' para revisión humana.
     # ══════════════════════════════════════════════════════════════════════
     _PAT_REC_B = re.compile(
-        r'RECHAZO|ND\s+POR|DEVOLUCI|ANULACI|RETORNO|REVERSO|COBRO\s+INV|REINTEGRO', re.I)
+        r'RECHAZOS?|DEBITO\s+POR|ND\s+POR|DEVOLUCI|ANULACI|RETORNO|REVERSO|COBRO\s+INV|REINTEGRO', re.I)
     _PAT_REC_A = re.compile(
-        r'RECHAZO|DEVOLUCI|ANULACI|RETORNO|REVERSO|REINTEGRO|NOTA\s+CONT', re.I)
-    _TOL_RECHAZO = 0.03   # ±3 % — cubre comisiones bancarias por rechazo
+        r'RECHAZOS?|DEVOLUCI|ANULACI|RETORNO|REVERSO|REINTEGRO|NOTA\s+CONT|COMISI|PAGOS\s+A', re.I)
+    _TOL_RECHAZO = 0.05   # ±5 % — cubre diferencias de comisión (ej. 2682.17 vs 2659.92 = 0.84%)
 
     if not df_comp.empty and not df_solo_aux.empty:
         # NC- libres en el auxiliar (solo las que quedaron sin emparejar)

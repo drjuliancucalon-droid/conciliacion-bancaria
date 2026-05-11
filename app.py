@@ -1661,6 +1661,42 @@ def comparar_documentos(df_b, df_a):
     idx_usados = set()
     filas      = []
 
+    # Patrón de rechazo definido ANTES del loop
+    _PAT_REC_B_LOOP = re.compile(
+        r'RECHAZOS?|DEBITO\s+POR\s+RECHAZO|ND\s+POR|DEVOLUCI|ANULACI|RETORNO|REVERSO|COBRO\s+INV|REINTEGRO', re.I)
+
+    # ── PRE-PASE: reservar NC- para entradas bancarias de rechazo ────────────
+    # Se procesan ANTES del loop principal para que las NC no sean consumidas
+    # por otros cargos con montos similares (ej. IVA, comisiones regulares).
+    _TOL_PRE_E   = 0.05   # ±5%
+    _pre_e_rows  = {}     # idx_banco → (idx_aux, row_aux)
+
+    _nc_pre = df_a[df_a['_PREFIJO'] == 'NC'].copy()
+    _nc_pre_usados = set()
+
+    for _idx_b, _row_b in df_b.iterrows():
+        _vb = _row_b.get('VALOR', np.nan)
+        if pd.isna(_vb) or float(_vb) >= 0:
+            continue   # solo CARGO
+        _desc = str(_row_b.get('DESCRIPCION', '') or '')
+        if not _PAT_REC_B_LOOP.search(_desc):
+            continue   # solo rechazos
+        _m = abs(float(_vb))
+        _cands = _nc_pre[
+            ~_nc_pre.index.isin(_nc_pre_usados) &
+            ((_nc_pre['CREDITO'] - _m).abs() / max(_m, 1) <= _TOL_PRE_E)
+        ].copy()
+        if _cands.empty:
+            continue
+        _cands['_dr'] = (_cands['CREDITO'] - _m).abs()
+        _mejor = _cands.sort_values('_dr').iloc[0]
+        _pre_e_rows[_idx_b] = (_mejor.name, _mejor)
+        _nc_pre_usados.add(_mejor.name)
+
+    # Reservar las NC emparejadas en el pre-pase: el loop principal no las usa
+    idx_usados.update(_nc_pre_usados)
+    # ── Fin PRE-PASE ──────────────────────────────────────────────────────────
+
     for idx_b, row_b in df_b.iterrows():
         vb = row_b['VALOR']
         if pd.isna(vb):
@@ -1821,6 +1857,29 @@ def comparar_documentos(df_b, df_a):
         })
 
     df_comp = pd.DataFrame(filas)
+
+    # ── Aplicar resultados del PRE-PASE a df_comp ────────────────────────────
+    # Los banco entries de rechazo quedaron como SOLO EN BANCO en el loop
+    # (sus NC estaban reservadas). Aquí los marcamos como RECHAZO-CONFIRMAR.
+    if _pre_e_rows and not df_comp.empty:
+        for _idx_b_pre, (_idx_a_pre, _row_a_pre) in _pre_e_rows.items():
+            _mask = (df_comp['N'] == _idx_b_pre) & df_comp['ESTADO'].str.contains('SOLO EN BANCO', na=False)
+            if _mask.any():
+                _nc_val = float(_row_a_pre.get('CREDITO', 0))
+                _bv     = abs(float(df_comp.loc[_mask, 'VALOR_BANCO'].iloc[0]))
+                _diff_pct = abs(_nc_val - _bv) / max(_bv, 1)
+                _conf_pre = max(45, int((1 - _diff_pct) * 90))
+                df_comp.loc[_mask, 'DOC_AUXILIAR']   = _row_a_pre.get('DOCUMENTO', '')
+                df_comp.loc[_mask, 'FECHA_AUXILIAR']  = _row_a_pre.get('FECHA_RAW', '')
+                df_comp.loc[_mask, 'CONCEPTO_AUX']   = _row_a_pre.get('CONCEPTO', '')
+                df_comp.loc[_mask, 'MONTO_AUXILIAR']  = _nc_val
+                df_comp.loc[_mask, 'DIFERENCIA']      = round(abs(_bv - _nc_val), 2)
+                df_comp.loc[_mask, 'ESTADO']          = '🔄 RECHAZO — CONFIRMAR'
+                df_comp.loc[_mask, 'MATCH_TIPO']      = 'RECHAZO'
+                df_comp.loc[_mask, 'METODO_MATCH']    = 'PRE_FASE_E'
+                df_comp.loc[_mask, 'CONFIANZA']       = _conf_pre
+    # ── Fin aplicación PRE-PASE ───────────────────────────────────────────────
+
     df_solo_aux = df_a[~df_a.index.isin(idx_usados)].copy()
     # Limpiar columnas internas del auxiliar
     for _c in ['_PREFIJO', '_NUMERICO', '_CONC_TOK']:

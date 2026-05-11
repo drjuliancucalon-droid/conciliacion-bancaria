@@ -651,7 +651,7 @@ def diagnosticar_pdf(ruta, tipo):
         'calidad': '', 'advertencias': [], 'ocr_usado': False
     }
 
-    pat_doc = re.compile(r'(?:CON|CE|NC)-\d+')
+    pat_doc = re.compile(r'(?:CON|CE|CG|NC|RE|RG)-\d+')
     pat_mov_banco = re.compile(r'^\d{1,2}/\d{2}\s+', re.MULTILINE)
 
     try:
@@ -741,6 +741,8 @@ def parsear_banco_pdf(ruta, usar_ocr=False):
         'SALDO_ACTUAL'  : r'SALDO\s+ACTUAL\s+\$?\s*([\d,\.]+)',
     }
 
+    anio_extracto = datetime.now().year   # se refina en la 1ª página del PDF
+
     with pdfplumber.open(ruta) as pdf:
         for n_pag, pag in enumerate(pdf.pages):
             # Obtener texto, con fallback a OCR si está vacío y usar_ocr=True
@@ -749,6 +751,10 @@ def parsear_banco_pdf(ruta, usar_ocr=False):
                 texto = ocr_pdf_page(ruta, pag.page_number)
 
             if n_pag == 0:
+                # Detectar año del período en la primera página (evita hardcoding)
+                _m_anio = re.search(r'\b(20\d{2})\b', texto)
+                if _m_anio:
+                    anio_extracto = int(_m_anio.group(1))
                 for clave, pat in pat_res.items():
                     m = re.search(pat, texto, re.IGNORECASE)
                     if m and clave not in resumen:
@@ -788,7 +794,7 @@ def parsear_banco_pdf(ruta, usar_ocr=False):
                     desc = re.sub(r'\s+', ' ', desc).strip()
                     registros.append({
                         'FECHA_RAW': fecha_raw,
-                        'FECHA': pd.to_datetime('2025/' + fecha_raw,
+                        'FECHA': pd.to_datetime(f'{anio_extracto}/' + fecha_raw,
                                         format='%Y/%d/%m', errors='coerce'),
                         'DESCRIPCION': desc,
                         'VALOR': valor,
@@ -816,7 +822,7 @@ def parsear_banco_pdf(ruta, usar_ocr=False):
                     valor = nums[-2] if len(nums) >= 2 else nums[0]
                     registros.append({
                         'FECHA_RAW': fecha_raw,
-                        'FECHA': pd.to_datetime('2025/' + fecha_raw,
+                        'FECHA': pd.to_datetime(f'{anio_extracto}/' + fecha_raw,
                                         format='%Y/%d/%m', errors='coerce'),
                         'DESCRIPCION': ' '.join(desc_p),
                         'VALOR': valor,
@@ -921,9 +927,9 @@ def parsear_auxiliar_pdf(ruta, usar_ocr=False):
     meta['N_PAGS_MAL'] = n_pags_mal
 
     # ── Parseo línea a línea (mismo código original) ─────────────────────────
-    PAT_DOC    = re.compile(r'^((?:CON|CE|NC)-\d+)\s+(\d{1,2}/\d{1,2}/\d{4})\s+(.*)')
+    PAT_DOC    = re.compile(r'^((?:CON|CE|CG|NC|RE|RG)-\d+)\s+(\d{1,2}/\d{1,2}/\d{4})\s+(.*)')
     PAT_MONTO  = re.compile(r'^([\d]{1,3}(?:,[\d]{3})*(?:\.[\d]{1,2})?)$')
-    PAT_MPFX   = re.compile(r'^([\d]{1,3}(?:,[\d]{3})*(?:\.[\d]{1,2})?)\s+((?:CON|CE|NC)-\d+.*)$')
+    PAT_MPFX   = re.compile(r'^([\d]{1,3}(?:,[\d]{3})*(?:\.[\d]{1,2})?)\s+((?:CON|CE|CG|NC|RE|RG)-\d+.*)$')
     PAT_MSFX   = re.compile(r'\s([\d]{1,3}(?:,[\d]{3})*(?:\.[\d]{1,2})?)$')
 
     registros   = []
@@ -1131,6 +1137,9 @@ def parsear_auxiliar_csv(df):
 def parsear_banco_txt(texto):
     registros = []
     resumen = {}
+    # Detectar año en el texto (evita hardcoding)
+    _m_anio_t = re.search(r'\b(20\d{2})\b', texto or '')
+    anio_extracto = int(_m_anio_t.group(1)) if _m_anio_t else datetime.now().year
     for linea in texto.split('\n'):
         partes = linea.strip().split()
         if not partes or not es_fecha_banco(partes[0]): continue
@@ -1145,7 +1154,7 @@ def parsear_banco_txt(texto):
         valor = nums[-2] if len(nums) >= 2 else nums[0]
         registros.append({
             'FECHA_RAW': fecha_raw,
-            'FECHA': pd.to_datetime('2025/' + fecha_raw, format='%Y/%d/%m', errors='coerce'),
+            'FECHA': pd.to_datetime(f'{anio_extracto}/' + fecha_raw, format='%Y/%d/%m', errors='coerce'),
             'DESCRIPCION': ' '.join(desc_p), 'VALOR': valor, 'SALDO': saldo,
             'TIPO': 'ABONO' if (valor or 0) >= 0 else 'CARGO'
         })
@@ -1167,9 +1176,9 @@ def parsear_auxiliar_txt(texto_completo):
     registros = []
     lineas = [l.strip() for l in texto_completo.split('\n') if l.strip()]
     pending_doc = None
-    PAT_DOC = re.compile(r'^((?:CON|CE|NC)-\d+)\s+(\d{1,2}/\d{1,2}/\d{4})\s+(.*)')
+    PAT_DOC = re.compile(r'^((?:CON|CE|CG|NC|RE|RG)-\d+)\s+(\d{1,2}/\d{1,2}/\d{4})\s+(.*)')
     PAT_MONTO = re.compile(r'^([\d]{1,3}(?:,[\d]{3})*(?:\.[\d]{1,2})?)$')
-    PAT_MPFX  = re.compile(r'^([\d]{1,3}(?:,[\d]{3})*(?:\.[\d]{1,2})?)\s+((?:CON|CE|NC)-\d+.*)$')
+    PAT_MPFX  = re.compile(r'^([\d]{1,3}(?:,[\d]{3})*(?:\.[\d]{1,2})?)\s+((?:CON|CE|CG|NC|RE|RG)-\d+.*)$')
     PAT_MSFX  = re.compile(r'\s([\d]{1,3}(?:,[\d]{3})*(?:\.[\d]{1,2})?)$')
     def guardar(doc, fecha_s, concepto, monto_str):
         monto = limpiar_num(monto_str.replace(',',''))
@@ -1686,7 +1695,8 @@ def comparar_documentos(df_b, df_a):
 
         match_tipo = match_monto = match_idx = None
         match_doc  = match_conc = match_fecha_aux = ''
-        match_metodo = ''
+        match_metodo  = ''
+        match_sim_val = 0.0
 
         if not candidatos.empty:
             candidatos['_diff'] = (candidatos[col_buscar] - monto_abs).abs()
@@ -1700,6 +1710,17 @@ def comparar_documentos(df_b, df_a):
             candidatos['_sim'] = candidatos['_CONC_TOK'].apply(
                 lambda t: _jaccard(banco_tok, t)
             )
+
+            # ── Bonus de proximidad de fecha (±5 días → +0.15) ───────────
+            _fecha_b = row_b.get('FECHA')
+            if pd.notna(_fecha_b) and 'FECHA' in candidatos.columns:
+                candidatos['_fecha_bonus'] = candidatos['FECHA'].apply(
+                    lambda f: 0.15 if (pd.notna(f) and
+                        abs((pd.Timestamp(f) - pd.Timestamp(_fecha_b)).days) <= 5)
+                    else 0.0
+                )
+            else:
+                candidatos['_fecha_bonus'] = 0.0
 
             # ── Fase D: catálogo NC (solo si hay reglas y solo NC-) ───────
             candidatos['_cat_sim'] = 0.0
@@ -1720,8 +1741,8 @@ def comparar_documentos(df_b, df_a):
             exactos = candidatos[candidatos['_diff'] <= TOL_EXACTA].copy()
             if not exactos.empty:
                 exactos = exactos.sort_values(
-                    ['_doc_bonus', '_cat_sim', '_sim', '_diff'],
-                    ascending=[False, False, False, True]
+                    ['_doc_bonus', '_cat_sim', '_fecha_bonus', '_sim', '_diff'],
+                    ascending=[False, False, False, False, True]
                 )
                 mejor = exactos.iloc[0]
                 match_tipo    = 'EXACTO'
@@ -1736,6 +1757,7 @@ def comparar_documentos(df_b, df_a):
                 match_doc       = mejor['DOCUMENTO']
                 match_conc      = mejor['CONCEPTO']
                 match_fecha_aux = mejor['FECHA_RAW']
+                match_sim_val   = float(mejor.get('_sim', 0.0))
 
             # ── Fallback: match aproximado ────────────────────────────────────
             if match_tipo is None and monto_abs > 0:
@@ -1744,8 +1766,8 @@ def comparar_documentos(df_b, df_a):
                 ].copy()
                 if not aprox.empty:
                     aprox = aprox.sort_values(
-                        ['_doc_bonus', '_cat_sim', '_sim', '_diff'],
-                        ascending=[False, False, False, True]
+                        ['_doc_bonus', '_cat_sim', '_fecha_bonus', '_sim', '_diff'],
+                        ascending=[False, False, False, False, True]
                     )
                     mejor = aprox.iloc[0]
                     match_tipo    = 'APROX'
@@ -1760,6 +1782,7 @@ def comparar_documentos(df_b, df_a):
                     match_doc       = mejor['DOCUMENTO']
                     match_conc      = mejor['CONCEPTO']
                     match_fecha_aux = mejor['FECHA_RAW']
+                    match_sim_val   = float(mejor.get('_sim', 0.0))
 
         if match_idx is not None:
             idx_usados.add(match_idx)
@@ -1768,6 +1791,16 @@ def comparar_documentos(df_b, df_a):
                     else '🔶 COINCIDE APROX.' if match_tipo == 'APROX'
                     else '❌ SOLO EN BANCO')
         diff_val = abs(monto_abs - match_monto) if match_monto is not None else None
+
+        # Calcular confianza del match
+        _confianza = {
+            'DOC+MONTO'      : 95,
+            'CATALOGO+MONTO' : 85,
+            'MONTO'          : max(60, 60 + int(match_sim_val * 25)),
+            'DOC+APROX'      : 75,
+            'CATALOGO+APROX' : 60,
+            'APROX'          : max(40, 40 + int(match_sim_val * 20)),
+        }.get(match_metodo, 0)
 
         filas.append({
             'N'              : idx_b,
@@ -1783,16 +1816,82 @@ def comparar_documentos(df_b, df_a):
             'ESTADO'         : estado,
             'MATCH_TIPO'     : match_tipo or 'SIN_MATCH',
             'METODO_MATCH'   : match_metodo,
+            'CONFIANZA'      : _confianza,
             'PAGINA_PDF'     : row_b.get('PAGINA', ''),
         })
 
     df_comp = pd.DataFrame(filas)
     df_solo_aux = df_a[~df_a.index.isin(idx_usados)].copy()
     # Limpiar columnas internas del auxiliar
-    for _c in ['_PREFIJO', '_NUMERICO']:
+    for _c in ['_PREFIJO', '_NUMERICO', '_CONC_TOK']:
         if _c in df_solo_aux.columns:
             df_solo_aux.drop(columns=[_c], inplace=True)
     df_solo_aux['ESTADO'] = '📋 SOLO EN AUXILIAR'
+
+    # ══════════════════════════════════════════════════════════════════════
+    # FASE E — Segundo paso: cargos rechazados sin asiento (tolerancia ±3%)
+    # Detecta cargos bancarios con keywords de rechazo/devolución y los
+    # empareja con NC- del auxiliar que quedaron sin match en el loop principal.
+    # Se muestra como '🔄 RECHAZO — CONFIRMAR' para revisión humana.
+    # ══════════════════════════════════════════════════════════════════════
+    _PAT_REC_B = re.compile(
+        r'RECHAZO|ND\s+POR|DEVOLUCI|ANULACI|RETORNO|REVERSO|COBRO\s+INV|REINTEGRO', re.I)
+    _PAT_REC_A = re.compile(
+        r'RECHAZO|DEVOLUCI|ANULACI|RETORNO|REVERSO|REINTEGRO|NOTA\s+CONT', re.I)
+    _TOL_RECHAZO = 0.03   # ±3 % — cubre comisiones bancarias por rechazo
+
+    if not df_comp.empty and not df_solo_aux.empty:
+        # NC- libres en el auxiliar (solo las que quedaron sin emparejar)
+        _nc_libres = df_solo_aux[
+            df_solo_aux.get('DOCUMENTO', pd.Series(dtype=str))
+                        .str.startswith('NC-', na=False) &
+            df_solo_aux['CREDITO'].notna()
+        ].copy()
+
+        _usados_fase_e = set()
+
+        for _fi in df_comp[df_comp['ESTADO'] == '❌ SOLO EN BANCO'].index:
+            _rc = df_comp.loc[_fi]
+            if str(_rc.get('TIPO_MOV', '') or '') != 'CARGO':
+                continue
+            _desc_b = str(_rc.get('DESCRIPCION', '') or '')
+            if not _PAT_REC_B.search(_desc_b):
+                continue
+            _monto_b = abs(float(_rc.get('VALOR_BANCO', 0) or 0))
+            if _monto_b < 1:
+                continue
+
+            # NC libres con diferencia de monto dentro de la tolerancia
+            _cands = _nc_libres[
+                ~_nc_libres.index.isin(_usados_fase_e) &
+                ((_nc_libres['CREDITO'] - _monto_b).abs() / _monto_b <= _TOL_RECHAZO)
+            ].copy()
+            if _cands.empty:
+                continue
+
+            # Priorizar NC que también tengan keywords de rechazo en su concepto
+            _cands['_rb'] = _cands['CONCEPTO'].fillna('').apply(
+                lambda _c: 2 if _PAT_REC_A.search(_c) else 0)
+            _cands['_dr'] = (_cands['CREDITO'] - _monto_b).abs()
+            _mejor_r = _cands.sort_values(['_rb', '_dr'],
+                                          ascending=[False, True]).iloc[0]
+
+            df_comp.loc[_fi, 'DOC_AUXILIAR']  = _mejor_r.get('DOCUMENTO', '')
+            df_comp.loc[_fi, 'FECHA_AUXILIAR'] = _mejor_r.get('FECHA_RAW', '')
+            df_comp.loc[_fi, 'CONCEPTO_AUX']  = _mejor_r.get('CONCEPTO', '')
+            df_comp.loc[_fi, 'MONTO_AUXILIAR'] = _mejor_r['CREDITO']
+            df_comp.loc[_fi, 'DIFERENCIA']    = abs(_monto_b - _mejor_r['CREDITO'])
+            df_comp.loc[_fi, 'ESTADO']        = '🔄 RECHAZO — CONFIRMAR'
+            df_comp.loc[_fi, 'MATCH_TIPO']    = 'RECHAZO'
+            df_comp.loc[_fi, 'METODO_MATCH']  = 'FASE_E'
+            df_comp.loc[_fi, 'CONFIANZA']     = 45
+
+            _usados_fase_e.add(_mejor_r.name)
+
+        # Quitar del auxiliar suelto las NC que Fase E emparejó
+        if _usados_fase_e:
+            df_solo_aux = df_solo_aux.drop(index=list(_usados_fase_e), errors='ignore')
+
     return df_comp, df_solo_aux
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2331,6 +2430,7 @@ if 'run' in st.session_state and st.session_state.run:
     if not df_aux.empty:
         df_comp, df_solo_aux = comparar_documentos(df_banco, df_aux)
         n_tot  = len(df_comp)
+        rechazos = df_comp[df_comp['ESTADO'] == '🔄 RECHAZO — CONFIRMAR']
         # ── Fase D3: auto-aprendizaje NC post-reconciliacion ─────────────────
         if not df_comp.empty and 'DOC_AUXILIAR' in df_comp.columns:
             _nc_matches = df_comp[
@@ -2347,6 +2447,7 @@ if 'run' in st.session_state and st.session_state.run:
         n_exac = (df_comp['ESTADO'] == '✅ COINCIDE EXACTO').sum()
         n_apr  = (df_comp['ESTADO'] == '🔶 COINCIDE APROX.').sum()
         n_sbco = (df_comp['ESTADO'] == '❌ SOLO EN BANCO').sum()
+        n_rec  = (df_comp['ESTADO'] == '🔄 RECHAZO — CONFIRMAR').sum()
         n_saux = len(df_solo_aux)
         pct_conc = (n_exac + n_apr) / max(n_tot, 1) * 100
         exactas = df_comp[df_comp['ESTADO'] == '✅ COINCIDE EXACTO']
@@ -2355,8 +2456,8 @@ if 'run' in st.session_state and st.session_state.run:
     else:
         df_comp = pd.DataFrame()
         df_solo_aux = pd.DataFrame()
-        n_tot = n_exac = n_apr = n_sbco = n_saux = pct_conc = 0
-        exactas = aprox = s_banco = pd.DataFrame()
+        n_tot = n_exac = n_apr = n_sbco = n_saux = n_rec = pct_conc = 0
+        exactas = aprox = s_banco = rechazos = pd.DataFrame()
     # ── Guardar análisis en historial ────────────────────────────────────────
     try:
         _per_det = _extraer_periodo(banco_file.name) if banco_file else None
@@ -2571,12 +2672,13 @@ if 'run' in st.session_state and st.session_state.run:
         if df_aux.empty:
             st.markdown("<div class='callout-warning'>⚠️ Sin datos del auxiliar para comparar.</div>", unsafe_allow_html=True)
         else:
-            c1, c2, c3, c4, c5 = st.columns(5)
+            c1, c2, c3, c4, c5, c6 = st.columns(6)
             c1.metric("Total Analizados", n_tot)
             c2.metric("✅ Exactos",    n_exac, f"{n_exac/max(n_tot,1)*100:.0f}%")
             c3.metric("🔶 Aprox.",     n_apr,  f"{n_apr/max(n_tot,1)*100:.0f}%")
-            c4.metric("❌ Solo Banco", n_sbco, f"{n_sbco/max(n_tot,1)*100:.0f}%")
-            c5.metric("📋 Solo Aux.",  n_saux)
+            c4.metric("🔄 Rechazos",   n_rec,  "Confirmar" if n_rec else "—")
+            c5.metric("❌ Solo Banco", n_sbco, f"{n_sbco/max(n_tot,1)*100:.0f}%")
+            c6.metric("📋 Solo Aux.",  n_saux)
 
             ico, lbl, cls = _semaforo_conciliacion(pct_conc)
             st.progress(pct_conc / 100, text=f"{ico} Tasa de conciliación: {pct_conc:.1f}% — {lbl}")
@@ -2587,6 +2689,13 @@ if 'run' in st.session_state and st.session_state.run:
                else ("Entre 75% y 90% de los movimientos conciliados. Hay diferencias puntuales que requieren revisión." if pct_conc>=75
                else "Menos del 75% de los movimientos conciliados. Se requiere revisión detallada del auxiliar contable.")}
             </div>""", unsafe_allow_html=True)
+            if n_rec > 0:
+                st.markdown(f"""
+                <div class='callout-warning'>
+                  <b>🔄 {n_rec} cargo(s) bancario(s) posiblemente vinculados a notas contables de rechazo/devolución.</b><br>
+                  El sistema detectó NC- con montos similares (±3%). Revíselos en la pestaña
+                  <b>📝 Diferencias</b> → sección <i>Rechazos / Devoluciones — Confirmar</i>.
+                </div>""", unsafe_allow_html=True)
 
             st.markdown("<div class='section-title'>📋 Tabla Completa de Comparación</div>", unsafe_allow_html=True)
             st.dataframe(df_comp, use_container_width=True, height=450)
@@ -2648,6 +2757,33 @@ if 'run' in st.session_state and st.session_state.run:
                     </div>""", unsafe_allow_html=True)
                     cols_a = [c for c in ['FECHA_BANCO','TIPO_MOV','VALOR_BANCO','MONTO_AUXILIAR','DIFERENCIA','DOC_AUXILIAR'] if c in aprox.columns]
                     st.dataframe(aprox[cols_a], use_container_width=True)
+
+            # ── SECCIÓN RECHAZOS / DEVOLUCIONES ──────────────────────────────
+            _bruto_rec = rechazos['VALOR_BANCO'].abs().sum() if not rechazos.empty else 0
+            with st.expander(
+                f"🔄 Rechazos / Devoluciones — CONFIRMAR — {n_rec} trans. · ${_bruto_rec:,.0f} COP",
+                expanded=(n_rec > 0)
+            ):
+                if rechazos.empty:
+                    st.markdown("<div class='callout-success'>✅ Sin cargos rechazados detectados este período.</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div class='callout-warning'>
+                      <b>🔄 {n_rec} cargo(s) bancario(s) posiblemente vinculados a NC por rechazo o devolución.</b><br>
+                      El sistema los detectó con tolerancia de monto ±3% (para cubrir comisiones bancarias por rechazo).
+                      <b>Requieren verificación manual</b> antes de darlos por conciliados.<br><br>
+                      <b>Qué hacer:</b> Compare cada fila — si el cargo bancario y la NC corresponden al mismo evento,
+                      el contador confirma que ya está registrado. Si no corresponden, cree la NC faltante en el sistema contable.
+                    </div>""", unsafe_allow_html=True)
+                    _cols_rec = [c for c in ['FECHA_BANCO','DESCRIPCION','VALOR_BANCO',
+                                             'DOC_AUXILIAR','FECHA_AUXILIAR','CONCEPTO_AUX',
+                                             'MONTO_AUXILIAR','DIFERENCIA','CONFIANZA'] if c in rechazos.columns]
+                    st.dataframe(rechazos[_cols_rec], use_container_width=True)
+                    st.markdown("""
+                    <div class='callout-accion'>
+                      <b>📌 ACCIÓN:</b> Si confirma la coincidencia → el cargo queda conciliado (no crear nueva NC).
+                      Si NO corresponde → crear NC en SIIGO con el valor exacto del cargo bancario.
+                    </div>""", unsafe_allow_html=True)
 
             # ── SECCIÓN CRÍTICA: Movimientos sin registro contable ──────────
             n_sb = len(s_banco)
@@ -2957,6 +3093,7 @@ if 'run' in st.session_state and st.session_state.run:
         FILL_AMARILLO = PatternFill("solid", fgColor="FFF3CD")
         FILL_ROJO     = PatternFill("solid", fgColor="F7C5C5")
         FILL_AZUL     = PatternFill("solid", fgColor="D0E8FF")
+        FILL_NARANJA  = PatternFill("solid", fgColor="FFE0B2")   # rechazos pendientes
         FILL_HEADER   = PatternFill("solid", fgColor="1565C0")
         FONT_HEADER   = Font(bold=True, color="FFFFFF", size=10)
 
@@ -2974,6 +3111,7 @@ if 'run' in st.session_state and st.session_state.run:
                 val = str(row[col_estado_idx - 1].value or "")
                 fill = (FILL_VERDE    if "COINCIDE EXACTO" in val else
                         FILL_AMARILLO if "COINCIDE APROX"  in val else
+                        FILL_NARANJA  if "RECHAZO"         in val else
                         FILL_ROJO     if "SOLO EN BANCO"   in val else
                         FILL_AZUL     if "SOLO EN AUXILIAR" in val else None)
                 if fill:
@@ -2996,20 +3134,21 @@ if 'run' in st.session_state and st.session_state.run:
             for estado, nombre in [
                 ("COINCIDE EXACTO", "2_Coincidencias_Exactas"),
                 ("COINCIDE APROX.", "3_Coincidencias_Aprox"),
-                ("SOLO EN BANCO",   "4_Solo_Banco_Sin_Auxiliar"),
+                ("RECHAZO",        "4_Rechazos_Confirmar"),
+                ("SOLO EN BANCO",  "5_Solo_Banco_Sin_Auxiliar"),
             ]:
                 sub = df_comp[df_comp["ESTADO"].str.contains(estado, na=False)].copy() if not df_aux.empty else pd.DataFrame()
                 if sub.empty: sub = pd.DataFrame({"Info": ["Sin registros"]})
                 sub.to_excel(writer, sheet_name=nombre, index=False)
 
             if not df_solo_aux.empty:
-                df_solo_aux.to_excel(writer, sheet_name="5_Solo_Auxiliar_Sin_Banco", index=False)
+                df_solo_aux.to_excel(writer, sheet_name="6_Solo_Auxiliar_Sin_Banco", index=False)
             else:
                 pd.DataFrame({"Info": ["Todos los asientos tienen movimiento bancario"]}).to_excel(
-                    writer, sheet_name="5_Solo_Auxiliar_Sin_Banco", index=False)
+                    writer, sheet_name="6_Solo_Auxiliar_Sin_Banco", index=False)
 
-            df_banco.to_excel(writer, sheet_name="6_Extracto_Banco_Completo", index=True)
-            df_aux.to_excel(writer, sheet_name="7_Auxiliar_Contable_Completo", index=True)
+            df_banco.to_excel(writer, sheet_name="7_Extracto_Banco_Completo", index=True)
+            df_aux.to_excel(writer, sheet_name="8_Auxiliar_Contable_Completo", index=True)
 
             resumen_data = {
                 "Concepto": [
@@ -3020,7 +3159,8 @@ if 'run' in st.session_state and st.session_state.run:
                     "Total debitos auxiliar", "Total creditos auxiliar",
                     "Diferencia saldos finales",
                     "Movimientos analizados", "Coincidencias exactas",
-                    "Coincidencias aprox.", "Solo en banco", "Solo en auxiliar",
+                    "Coincidencias aprox.", "Rechazos confirmar",
+                    "Solo en banco", "Solo en auxiliar",
                     "Tasa de conciliacion %",
                 ],
                 "Valor": [
@@ -3028,11 +3168,11 @@ if 'run' in st.session_state and st.session_state.run:
                     sa, sac, tab_s, tca_s,
                     si_a, sf_a, td_a, tc_a,
                     sac - sf_a,
-                    n_tot, n_exac, n_apr, n_sbco, n_saux,
+                    n_tot, n_exac, n_apr, int(n_rec), n_sbco, n_saux,
                     round(pct_conc, 1),
                 ]
             }
-            pd.DataFrame(resumen_data).to_excel(writer, sheet_name="8_Resumen_Conciliacion", index=False)
+            pd.DataFrame(resumen_data).to_excel(writer, sheet_name="9_Resumen_Conciliacion", index=False)
 
             wb = writer.book
             for sname in wb.sheetnames:

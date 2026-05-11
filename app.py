@@ -1686,22 +1686,27 @@ def comparar_documentos(df_b, df_a):
             candidatos['_diff'] = (candidatos[col_buscar] - monto_abs).abs()
 
             # ── Fase B: bonus si el número de doc aparece en descripción bancaria ──
-            candidatos['_doc_bonus'] = candidatos['_NUMERICO'].apply(
-                lambda n: 1 if (n and n in desc_banco) else 0
+            # Vectorizado: comparar string en string sin apply(axis=1)
+            _num_series = candidatos['_NUMERICO'].fillna('')
+            candidatos['_doc_bonus'] = _num_series.apply(
+                lambda n: 1 if n and n in desc_banco else 0
             )
 
-            # ── Similitud de concepto como desempate ─────────────────────────
-            candidatos['_sim'] = candidatos['CONCEPTO'].apply(
+            # ── Similitud de concepto (Series.apply — axis=0, mucho más rápido) ─
+            candidatos['_sim'] = candidatos['CONCEPTO'].fillna('').apply(
                 lambda c: _score_concepto(desc_banco, c)
             )
 
-            # ── Fase D: bonus catálogo NC (en memoria, sin SQLite por fila) ──────
-            candidatos['_cat_sim'] = candidatos.apply(
-                lambda row: (
-                    _cat_sim_memoria(desc_banco, str(row.get('CONCEPTO', '') or ''))
-                    if row.get('_PREFIJO', '') == 'NC' else 0.0
-                ), axis=1
-            )
+            # ── Fase D: bonus catálogo NC — vectorizado, sin apply(axis=1) ──────
+            candidatos['_cat_sim'] = 0.0
+            if _catalogo_nc_cache:
+                _nc_mask = candidatos['_PREFIJO'] == 'NC'
+                if _nc_mask.any():
+                    candidatos.loc[_nc_mask, '_cat_sim'] = (
+                        candidatos.loc[_nc_mask, 'CONCEPTO'].apply(
+                            lambda c: _cat_sim_memoria(desc_banco, str(c or ''))
+                        )
+                    )
 
             # ── Score combinado ───────────────────────────────────────────────
             exactos = candidatos[candidatos['_diff'] <= TOL_EXACTA].copy()

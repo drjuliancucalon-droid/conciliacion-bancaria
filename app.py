@@ -836,27 +836,57 @@ def parsear_banco_pdf(ruta, usar_ocr=False):
     return df, resumen
 
 # ── Parseo auxiliar original (PDF) + OCR ─────────────────────────────────────
+# ── Reglas por concepto (se evalúan ANTES del prefijo de documento) ──────────
+# Orden importa: más específico primero
 REGLAS_COL = [
-    (re.compile(r'ABONO\s+A\s+PRESTAMO', re.I),            'DEBITO'),
-    (re.compile(r'RENDIMIENTO|INTERES\s+AHORROS', re.I),     'DEBITO'),
-    (re.compile(r'\bN\.D\.\b', re.I),                     'DEBITO'),
-    (re.compile(r'\bPRESTAMO\b(?!.*ABONO)', re.I),          'CREDITO'),
-    (re.compile(r'RETIRO\s+PARA\s+PAGO', re.I),             'CREDITO'),
-    (re.compile(r'CANCELACION\s+NOMINA', re.I),              'CREDITO'),
-    (re.compile(r'GASTO\s+BANCAR|\bN\.C\.\b', re.I),     'CREDITO'),
-    (re.compile(r'IMPUESTO\s+MOVIMIENTO|GMF|4X1000', re.I),  'CREDITO'),
+    # ── DÉBITOS (entradas a la cuenta) ────────────────────────────────────────
+    (re.compile(r'ABONO\s+A\s+PRESTAMO',             re.I), 'DEBITO'),
+    (re.compile(r'RENDIMIENTO|INTERES\s+AHORROS',     re.I), 'DEBITO'),
+    (re.compile(r'RECAUDO|INGRESO\s+CAJA|CONSIGNACI', re.I), 'DEBITO'),
+    (re.compile(r'ABONO\s+CARTERA|ABONO\s+CUENTA',   re.I), 'DEBITO'),
+    (re.compile(r'\bN\.D\.\b',                     re.I), 'DEBITO'),
+    # ── CRÉDITOS (salidas / cargos bancarios) ─────────────────────────────────
+    (re.compile(r'COMISION|COBRO\s+IVA|IVA\s+PAGOS', re.I), 'CREDITO'),
+    (re.compile(r'4\s*POR\s*MIL|IMPTO\s+GOB|GRAVAMEN', re.I), 'CREDITO'),
+    (re.compile(r'NOTA\s+CONTABLE|CARGO\s+BANC',     re.I), 'CREDITO'),
+    (re.compile(r'NEQUI|PSE|DAVIPLATA|TRANSFIYA',      re.I), 'CREDITO'),
+    (re.compile(r'\bPRESTAMO\b(?!.*ABONO)',           re.I), 'CREDITO'),
+    (re.compile(r'RETIRO\s+PARA\s+PAGO',             re.I), 'CREDITO'),
+    (re.compile(r'CANCELACION\s+NOMINA',              re.I), 'CREDITO'),
+    (re.compile(r'GASTO\s+BANCAR|\bN\.C\.\b',     re.I), 'CREDITO'),
+    (re.compile(r'IMPUESTO\s+MOVIMIENTO|GMF|4X1000',  re.I), 'CREDITO'),
+    (re.compile(r'ND\s+POR\s+RECHAZO|RECHAZO\s+PAGO', re.I), 'CREDITO'),
+    (re.compile(r'CUOTA\s+CREDITO|CUOTA\s+PRESTAMO', re.I), 'CREDITO'),
 ]
 
 def determinar_columna(concepto, doc_code):
+    """
+    Determina si un asiento va a DÉBITO o CRÉDITO.
+    Prioridad: 1) Concepto (REGLAS_COL)  2) Prefijo del documento
+    Prefijos conocidos:
+        CE- Comprobante Egreso     → CRÉDITO  (pago a proveedor)
+        NC- Nota Contable          → CRÉDITO  (comisión/cargo bancario)
+        CG- Comprobante Ingreso    → DÉBITO   (entrada de dinero)
+        CON- Comprobante General   → DÉBITO   (por defecto)
+        CO- igual que CON-         → DÉBITO
+    """
     for pat, col in REGLAS_COL:
         if pat.search(concepto or ''):
             return col
-    doc_prefix = doc_code[:2].upper() if doc_code else ''
-    if doc_prefix == 'CE':
+    doc_prefix = (doc_code[:3].upper() if doc_code and len(doc_code) >= 3
+                  else (doc_code or '')[:2].upper())
+    # Prefijos de egreso / cargo
+    if doc_prefix in ('CE-', 'NC-'):
         return 'CREDITO'
-    if doc_prefix == 'CO':
+    if doc_prefix[:2] in ('CE', 'NC'):
+        return 'CREDITO'
+    # Prefijos de ingreso / abono
+    if doc_prefix in ('CG-', 'CON'):
         return 'DEBITO'
-    return 'DESCONOCIDO'
+    if doc_prefix[:2] in ('CG', 'CO'):
+        return 'DEBITO'
+    # Fallback conservador: la mayoría de asientos auxiliares son egresos
+    return 'CREDITO'
 
 def parsear_auxiliar_pdf(ruta, usar_ocr=False):
     texto_completo = ''

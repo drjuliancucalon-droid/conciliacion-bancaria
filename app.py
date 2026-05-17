@@ -2049,6 +2049,53 @@ def comparar_documentos(df_b, df_a):
         if not _sb_f.empty and '_usados_f_nc' in dir() and _usados_f_nc:
             df_solo_aux = df_solo_aux.drop(index=list(_usados_f_nc), errors='ignore')
 
+    # ══════════════════════════════════════════════════════════════════════
+    # POST-PROCESO: candidato más cercano para entradas SOLO EN BANCO
+    # Para cada movimiento sin match, busca el asiento auxiliar con monto
+    # más próximo (sin importar tolerancia) y explica por qué no coincidió.
+    # Estas columnas se usan en la UI y en la hoja Excel de acciones.
+    # ══════════════════════════════════════════════════════════════════════
+    for _col_new in ['CANDIDATO_DOC','CANDIDATO_CONCEPTO','CANDIDATO_MONTO',
+                     'CANDIDATO_DIFF_PCT','RAZON_NO_MATCH']:
+        if _col_new not in df_comp.columns:
+            df_comp[_col_new] = ''
+
+    _sb_mask = df_comp['ESTADO'].str.contains('SOLO EN BANCO', na=False)
+    if _sb_mask.any() and not df_a.empty:
+        _aux_cred = df_a[df_a.get('CREDITO', pd.Series(0, index=df_a.index)) > 0].copy()
+        _aux_deb  = df_a[df_a.get('DEBITO',  pd.Series(0, index=df_a.index)) > 0].copy()
+
+        for _si, _sr in df_comp[_sb_mask].iterrows():
+            _vb = abs(float(_sr.get('VALOR_BANCO', 0) or 0))
+            if _vb < 1:
+                df_comp.loc[_si, 'RAZON_NO_MATCH'] = 'Monto cero o no definido'
+                continue
+            _es_cargo = float(_sr.get('VALOR_BANCO', 0) or 0) < 0
+            _pool = _aux_cred if _es_cargo else _aux_deb
+            _col_v = 'CREDITO' if _es_cargo else 'DEBITO'
+            if _pool.empty:
+                df_comp.loc[_si, 'RAZON_NO_MATCH'] = 'Sin asientos en auxiliar'
+                continue
+            _p = _pool.copy()
+            _p['_da'] = (_p[_col_v] - _vb).abs()
+            _p['_dp'] = _p['_da'] / max(_vb, 1) * 100
+            _mc = _p.sort_values('_da').iloc[0]
+            _dpct = round(float(_mc['_dp']), 1)
+            df_comp.loc[_si, 'CANDIDATO_DOC']     = str(_mc.get('DOCUMENTO', ''))
+            df_comp.loc[_si, 'CANDIDATO_CONCEPTO'] = str(_mc.get('CONCEPTO', ''))[:80]
+            df_comp.loc[_si, 'CANDIDATO_MONTO']   = float(_mc[_col_v])
+            df_comp.loc[_si, 'CANDIDATO_DIFF_PCT'] = _dpct
+            # Razón detallada
+            if _dpct <= 0.5:
+                _r = 'Monto coincide pero concepto/doc no matchea'
+            elif _dpct <= 5.0:
+                _r = f'Diferencia de monto {_dpct:.1f}% (fuera de tolerancia ±0.5%)'
+            elif _dpct <= 20.0:
+                _r = f'Diferencia de monto significativa ({_dpct:.1f}%)'
+            else:
+                _r = 'Sin asiento con monto similar — registrar NC'
+            df_comp.loc[_si, 'RAZON_NO_MATCH'] = _r
+
     return df_comp, df_solo_aux
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2356,11 +2403,44 @@ def _guia_banco_sin_aux(row):
     ref_pagina = f"Página <b>{pagina}</b> del PDF" if pagina else "Ver extracto bancario"
     cuenta, comprobante = _inferir_cuenta_sugerida(desc, valor)
     signo  = "+" if valor > 0 else "-"
+
+    # Bloque candidato más cercano (si existe)
+    cand_doc  = str(row.get('CANDIDATO_DOC', '') or '')
+    cand_conc = str(row.get('CANDIDATO_CONCEPTO', '') or '')[:60]
+    cand_mon  = row.get('CANDIDATO_MONTO', None)
+    diff_pct  = row.get('CANDIDATO_DIFF_PCT', None)
+    razon     = str(row.get('RAZON_NO_MATCH', '') or '')
+
+    if cand_doc and str(cand_mon) not in ('nan', '', 'None'):
+        try:
+            _dpct_str = f"{float(diff_pct):.1f}%" if diff_pct is not None else '—'
+            _cmon_str = f"${float(cand_mon):,.0f}"
+        except Exception:
+            _dpct_str, _cmon_str = '—', '—'
+        if float(diff_pct or 99) <= 0.5:
+            _cand_color = '#f57f17'
+            _cand_label = '🟡 Monto coincide — revisar concepto/doc'
+        elif float(diff_pct or 99) <= 5:
+            _cand_color = '#e65100'
+            _cand_label = '🟠 Diferencia leve de monto'
+        else:
+            _cand_color = '#c62828'
+            _cand_label = '🔴 Sin asiento equivalente — crear NC'
+        cand_html = f"""<br><b>🔍 CANDIDATO MÁS CERCANO EN AUXILIAR</b>
+&nbsp;&nbsp;Doc: <b>{cand_doc}</b> &nbsp;|&nbsp; Monto: <b>{_cmon_str}</b>
+&nbsp;&nbsp;Diff: <b style='color:{_cand_color}'>{_dpct_str}</b> &nbsp;|&nbsp;
+<span style='color:{_cand_color}'>{_cand_label}</span><br>
+&nbsp;&nbsp;Concepto: <i>"{cand_conc}"</i><br>
+&nbsp;&nbsp;<small style='color:#666'>Razón: {razon}</small>"""
+    else:
+        cand_html = "<br><b>🔍 CANDIDATO:</b> <span style='color:#c62828'>Sin asiento similar encontrado — crear NC</span>"
+
     return f"""
 <div class='guia-row'>
 <b>📍 UBICAR EN EXTRACTO BANCARIO</b><br>
 &nbsp;&nbsp;Fecha: <b>{fecha}</b> &nbsp;|&nbsp; Tipo: <b>{tipo}</b> &nbsp;|&nbsp; Valor: <b>{signo}${abs(valor):,.0f}</b> &nbsp;|&nbsp; {ref_pagina}<br>
-&nbsp;&nbsp;Descripción: <i>"{desc}"</i><br><br>
+&nbsp;&nbsp;Descripción: <i>"{desc}"</i>
+{cand_html}<br>
 <b>✏️ ACCIÓN EN SISTEMA CONTABLE</b><br>
 &nbsp;&nbsp;Crear comprobante: <b>{comprobante}-XXXXXX</b><br>
 &nbsp;&nbsp;Fecha: <b>{fecha}</b> &nbsp;|&nbsp; Cuenta sugerida: <b>{cuenta}</b><br>
@@ -2994,7 +3074,7 @@ if 'run' in st.session_state and st.session_state.run:
             # ── SECCIÓN CRÍTICA: Movimientos sin registro contable ──────────
             n_sb = len(s_banco)
             bruto_sb = s_banco['VALOR_BANCO'].abs().sum() if not s_banco.empty else 0
-            with st.expander(f"❌ Movimientos Bancarios SIN Registro Contable — {int(n_sb)} trans. · Bruto: ${bruto_sb:,.0f} COP", expanded=bool(n_sb > 0)):
+            with st.expander(f"❌ Movimientos Bancarios SIN Registro Contable — {int(n_sb)} trans. · ${bruto_sb:,.0f} COP", expanded=bool(n_sb > 0)):
                 if s_banco.empty:
                     st.markdown("<div class='callout-success'>✅ Todos los movimientos tienen asiento contable.</div>", unsafe_allow_html=True)
                 else:
@@ -3009,13 +3089,67 @@ if 'run' in st.session_state and st.session_state.run:
                       <b>Valor bruto no registrado: ${bruto_sb:,.0f} COP</b>
                     </div>""", unsafe_allow_html=True)
 
+                    # ── DIAGNÓSTICO POR GRUPO ──────────────────────────────
+                    st.markdown("<div class='section-title'>📊 Diagnóstico por Grupo de Transacciones</div>", unsafe_allow_html=True)
+                    st.caption("Cada grupo de transacciones con la misma descripción se analiza en conjunto. "
+                               "La columna 'Candidato en Auxiliar' muestra el asiento más cercano encontrado.")
+
+                    def _badge_grupo(diff_pct, razon):
+                        if diff_pct is None or str(razon) == 'Sin asiento con monto similar — registrar NC':
+                            return "🔴 Sin NC — Crear asiento"
+                        elif diff_pct <= 0.5:
+                            return "🟡 Monto OK — Revisar concepto/doc"
+                        elif diff_pct <= 5:
+                            return "🟠 Diferencia monto leve"
+                        else:
+                            return "🔴 Sin NC similar"
+
+                    # Agrupar por descripción
+                    _sb_grp = s_banco.copy()
+                    _sb_grp['_desc_key'] = _sb_grp['DESCRIPCION'].str[:50]
+                    grupos_diag = []
+                    for _dk, _dg in _sb_grp.groupby('_desc_key', sort=False):
+                        _total   = _dg['VALOR_BANCO'].abs().sum()
+                        _cnt     = len(_dg)
+                        _min_diff = _dg['CANDIDATO_DIFF_PCT'].min() if 'CANDIDATO_DIFF_PCT' in _dg.columns else None
+                        _cand_doc  = _dg['CANDIDATO_DOC'].iloc[0] if 'CANDIDATO_DOC' in _dg.columns else ''
+                        _cand_conc = _dg['CANDIDATO_CONCEPTO'].iloc[0] if 'CANDIDATO_CONCEPTO' in _dg.columns else ''
+                        _cand_mon  = _dg['CANDIDATO_MONTO'].iloc[0] if 'CANDIDATO_MONTO' in _dg.columns else None
+                        _razon     = _dg['RAZON_NO_MATCH'].iloc[0] if 'RAZON_NO_MATCH' in _dg.columns else ''
+                        grupos_diag.append({
+                            'Descripción Banco': str(_dk)[:45],
+                            'Cant.': int(_cnt),
+                            'Total ($)': round(_total, 0),
+                            'Candidato Auxiliar': str(_cand_doc)[:15],
+                            'Concepto Candidato': str(_cand_conc)[:40],
+                            'Monto Candidato': round(float(_cand_mon), 0) if _cand_mon and str(_cand_mon) not in ('nan','') else None,
+                            'Diff %': f"{_min_diff:.1f}%" if _min_diff is not None and str(_min_diff) != 'nan' else '—',
+                            'Diagnóstico': _badge_grupo(_min_diff, _razon),
+                        })
+                    df_diag = pd.DataFrame(grupos_diag)
+                    # Colorear filas según diagnóstico
+                    def _color_diag(val):
+                        if '🔴' in str(val): return 'color:#c62828;font-weight:700'
+                        if '🟠' in str(val): return 'color:#e65100;font-weight:600'
+                        if '🟡' in str(val): return 'color:#f57f17;font-weight:600'
+                        return ''
+                    st.dataframe(
+                        df_diag.style.applymap(_color_diag, subset=['Diagnóstico']),
+                        use_container_width=True, hide_index=True
+                    )
+
                     st.markdown("""
                     <div class='callout-accion'>
-                      <b>📌 ¿QUÉ HACER?</b> Para cada fila de abajo: ubique el movimiento en el extracto físico
-                      y cree el comprobante contable correspondiente en su sistema (SIIGO / Helisa / World Office).
+                      <b>📌 ¿QUÉ HACER?</b>
+                      <ul style='margin:4px 0 0 16px;'>
+                        <li><b>🔴 Sin NC</b>: Crear Nota Contable en SIIGO con el valor exacto del cargo bancario.</li>
+                        <li><b>🟠 Diferencia leve</b>: Verificar si la NC existe con monto diferente y ajustar.</li>
+                        <li><b>🟡 Monto OK</b>: Revisar el número de documento o concepto en el auxiliar.</li>
+                      </ul>
                     </div>""", unsafe_allow_html=True)
 
-                    st.markdown("<div class='section-title'>Guía de acción por movimiento</div>", unsafe_allow_html=True)
+                    # ── DETALLE INDIVIDUAL ─────────────────────────────────
+                    st.markdown("<div class='section-title'>📋 Detalle por Movimiento — Guía de Acción</div>", unsafe_allow_html=True)
                     for _, row in s_banco.iterrows():
                         st.markdown(_guia_banco_sin_aux(row), unsafe_allow_html=True)
 
@@ -3382,6 +3516,61 @@ if 'run' in st.session_state and st.session_state.run:
                 ]
             }
             pd.DataFrame(resumen_data).to_excel(writer, sheet_name="9_Resumen_Conciliacion", index=False)
+
+            # ── Hoja 10: Acciones Requeridas (SOLO EN BANCO con candidato) ──
+            if not df_aux.empty:
+                _sb_acciones = df_comp[df_comp['ESTADO'].str.contains('SOLO EN BANCO', na=False)].copy()
+                if not _sb_acciones.empty:
+                    _cols_acc = [c for c in [
+                        'FECHA_BANCO','TIPO_MOV','DESCRIPCION','VALOR_BANCO',
+                        'CANDIDATO_DOC','CANDIDATO_CONCEPTO','CANDIDATO_MONTO',
+                        'CANDIDATO_DIFF_PCT','RAZON_NO_MATCH'
+                    ] if c in _sb_acciones.columns]
+                    _sb_acc_out = _sb_acciones[_cols_acc].copy()
+                    _sb_acc_out.rename(columns={
+                        'FECHA_BANCO':         'Fecha Banco',
+                        'TIPO_MOV':            'Tipo',
+                        'DESCRIPCION':         'Descripcion Banco',
+                        'VALOR_BANCO':         'Valor Banco',
+                        'CANDIDATO_DOC':       'Candidato Auxiliar',
+                        'CANDIDATO_CONCEPTO':  'Concepto Candidato',
+                        'CANDIDATO_MONTO':     'Monto Candidato',
+                        'CANDIDATO_DIFF_PCT':  'Diferencia %',
+                        'RAZON_NO_MATCH':      'Razon No Coincidio',
+                    }, inplace=True)
+                    # Agregar columna ACCION con instrucción concreta
+                    def _accion_req(r):
+                        diff = r.get('Diferencia %', None)
+                        try:
+                            diff = float(diff)
+                        except Exception:
+                            diff = 99
+                        if diff <= 0.5:
+                            return 'Revisar numero de documento o concepto en SIIGO'
+                        elif diff <= 5:
+                            return 'Verificar NC en SIIGO — posible diferencia de redondeo'
+                        else:
+                            return 'Crear Nota Contable en SIIGO con valor exacto del extracto'
+                    _sb_acc_out['ACCION REQUERIDA'] = _sb_acc_out.apply(_accion_req, axis=1)
+                    _sb_acc_out.to_excel(writer, sheet_name="10_Acciones_Requeridas", index=False)
+
+                    # Colorear hoja 10 según urgencia de acción
+                    _ws10 = writer.book["10_Acciones_Requeridas"]
+                    from openpyxl.styles import PatternFill as _PF
+                    _fill_red  = _PF(fill_type='solid', fgColor='FFCDD2')  # rojo claro
+                    _fill_org  = _PF(fill_type='solid', fgColor='FFE0B2')  # naranja claro
+                    _fill_yel  = _PF(fill_type='solid', fgColor='FFF9C4')  # amarillo claro
+                    _acc_col_idx = {cell.value: cell.column for cell in _ws10[1]}
+                    _diff_col   = _acc_col_idx.get('Diferencia %', None)
+                    _accion_col = _acc_col_idx.get('ACCION REQUERIDA', None)
+                    for _wr in _ws10.iter_rows(min_row=2, max_row=_ws10.max_row):
+                        try:
+                            _dv = float(_wr[_diff_col - 1].value) if _diff_col else 99
+                        except Exception:
+                            _dv = 99
+                        _fill = _fill_red if _dv > 5 else (_fill_org if _dv > 0.5 else _fill_yel)
+                        for _wc in _wr:
+                            _wc.fill = _fill
 
             wb = writer.book
             for sname in wb.sheetnames:

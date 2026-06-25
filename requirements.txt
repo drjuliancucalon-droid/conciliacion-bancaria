@@ -9,3 +9,4 @@ google-auth==2.29.0
 # OCR para PDF escaneados (imágenes)
 pdf2image==1.17.0
 pytesseract==0.3.13
+reportlab==4.3.3

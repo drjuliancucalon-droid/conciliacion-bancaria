@@ -25,6 +25,16 @@ from engine.nc_learning import (
     listar_catalogo_nc,
 )
 
+from engine.puc import (
+    asignar_puc,
+    asignar_puc_a_dataframe,
+    resumen_por_puc,
+)
+from engine.comisiones import (
+    detectar_comisiones,
+    generar_reporte_comisiones,
+)
+
 __all__ = [
     'comparar_documentos',
     '_prefijo_doc',
@@ -41,4 +51,9 @@ __all__ = [
     '_promover_candidatos_nc',
     '_aprender_match_nc',
     'listar_catalogo_nc',
+    'asignar_puc',
+    'asignar_puc_a_dataframe',
+    'resumen_por_puc',
+    'detectar_comisiones',
+    'generar_reporte_comisiones',
 ]

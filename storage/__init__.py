@@ -16,7 +16,9 @@ if OFFLINE_MODE:
         _auto_guardar_excel,
         _init_db,
     )
-    from engine.nc_learning import _aprender_match_nc as _aprender_match_nc_impl
+    def _get_aprender_match_nc_impl():
+        from engine.nc_learning import _aprender_match_nc
+        return _aprender_match_nc
 else:
     from storage.sheets import (
         _guardar_historial_sheets as _guardar_historial_impl,
@@ -47,8 +49,12 @@ def leer_historial(limite=8):
 
 def registrar_aprendizaje_nc(banco_desc, aux_doc, aux_concepto, metodo,
                              valor_banco=None, valor_aux=None):
-    _aprender_match_nc_impl(banco_desc, aux_doc, aux_concepto, metodo,
-                            valor_banco, valor_aux)
+    if OFFLINE_MODE:
+        _get_aprender_match_nc_impl()(banco_desc, aux_doc, aux_concepto, metodo,
+                                       valor_banco, valor_aux)
+    else:
+        _aprender_match_nc_impl(banco_desc, aux_doc, aux_concepto, metodo,
+                                valor_banco, valor_aux)
 
 
 __all__ = [

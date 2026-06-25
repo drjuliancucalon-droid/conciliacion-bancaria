@@ -1,4 +1,17 @@
-*
-!app.py
-!requirements.txt
-!.gitignore
+# Archivos generados en ejecución - NO subir a git
+venv/
+__pycache__/
+*.pyc
+*.pyo
+conciliaciones.db
+datos_entrada/
+reportes_excel/
+*.xlsx
+*.db
+
+# Configuración local
+.env
+.streamlit/secrets.toml
+
+# Excluir repositorios anidados
+cociliacion bancaria/

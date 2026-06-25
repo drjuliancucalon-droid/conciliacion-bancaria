@@ -6,6 +6,6 @@ matplotlib==3.10.8
 openpyxl==3.1.5
 gspread==6.1.2
 google-auth==2.29.0
-# Opcional - solo para PDF escaneados (imágenes):
-# pdf2image
-# pytesseract
+# OCR para PDF escaneados (imágenes)
+pdf2image==1.17.0
+pytesseract==0.3.13
